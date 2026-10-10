@@ -98,6 +98,12 @@ tokens served would sell for, at the price variables at the top of the dashboard
 hour. The defaults are a $2 VM hour and the Qwen3.8-27B list price on OpenRouter on 2026-10-09
 ($0.425 per 1M input tokens, $0.085 cached input, $2.55 output); change them to your own.
 
+The **Traces and logs** row reads Application Insights with KQL through the Azure Monitor data source: one
+row per model call from the LiteLLM spans (duration, time to first token, tokens, finish reason, trace ID),
+and vLLM's engine-stats and warning log lines. Pick the Azure Monitor data source in the `azmon` variable,
+and set the hidden `appinsights` variable (Settings > Variables) to your Application Insights resource ID.
+The panels show selected fields only: the LLM-call spans also carry every tool definition the client sends.
+
 Every metric, log and span carries `upstream_model` (from `LLM_MODEL`), so runs of different models on the
 same VM can be compared.
 

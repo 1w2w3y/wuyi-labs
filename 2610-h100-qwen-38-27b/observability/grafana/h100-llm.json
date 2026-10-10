@@ -100,6 +100,35 @@
             "value": "2.55"
           }
         ]
+      },
+      {
+        "type": "datasource",
+        "name": "azmon",
+        "label": "Azure Monitor",
+        "query": "grafana-azure-monitor-datasource",
+        "hide": 0,
+        "refresh": 1,
+        "regex": "",
+        "current": {},
+        "options": []
+      },
+      {
+        "type": "textbox",
+        "name": "appinsights",
+        "label": "Application Insights",
+        "query": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>",
+        "hide": 2,
+        "current": {
+          "text": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>",
+          "value": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>"
+        },
+        "options": [
+          {
+            "selected": true,
+            "text": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>",
+            "value": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>"
+          }
+        ]
       }
     ]
   },
@@ -4808,6 +4837,259 @@
         "y": 138,
         "w": 8,
         "h": 8
+      }
+    },
+    {
+      "type": "row",
+      "id": 74,
+      "title": "Traces and logs (Application Insights)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 146,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 75,
+      "title": "LLM calls (traces)",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${azmon}"
+      },
+      "description": "One row per model call, from the LiteLLM spans in Application Insights: duration, time to first token, token counts and why generation stopped. Errors carry no token counts. Open the trace ID in Application Insights or Grafana Explore for the whole request.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${azmon}"
+          },
+          "queryType": "Azure Log Analytics",
+          "azureLogAnalytics": {
+            "query": "dependencies\n| where $__timeFilter(timestamp)\n| where name startswith \"chat \"\n| extend d = customDimensions\n| project Time = timestamp,\n    ['Result'] = iff(success, \"ok\", \"error\"),\n    ['Duration'] = duration / 1000.0,\n    ['Time to first token'] = todouble(d[\"gen_ai.response.time_to_first_chunk\"]),\n    ['Input tokens'] = tolong(d[\"gen_ai.usage.input_tokens\"]),\n    ['Output tokens'] = tolong(d[\"gen_ai.usage.output_tokens\"]),\n    ['Finish reason'] = tostring(todynamic(tostring(d[\"gen_ai.response.finish_reasons\"]))[0]),\n    ['Trace ID'] = operation_Id\n| order by Time desc\n| take 200",
+            "resources": [
+              "$appinsights"
+            ],
+            "resultFormat": "table"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Duration|Time to first token)$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time to first token"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 10
+                    },
+                    {
+                      "color": "red",
+                      "value": 30
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Input tokens"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 262144
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "basic",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Output tokens"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Result"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "ok": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "error": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Trace ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 147,
+        "w": 14,
+        "h": 12
+      }
+    },
+    {
+      "type": "logs",
+      "id": 76,
+      "title": "Model server log (vLLM engine stats and warnings)",
+      "datasource": {
+        "type": "grafana-azure-monitor-datasource",
+        "uid": "${azmon}"
+      },
+      "description": "vLLM's own log lines from the model container, shipped by the collector's filelog receiver: the engine stats it prints every 10 seconds, plus any warning or error.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-azure-monitor-datasource",
+            "uid": "${azmon}"
+          },
+          "queryType": "Azure Log Analytics",
+          "azureLogAnalytics": {
+            "query": "traces\n| where $__timeFilter(timestamp)\n| where tostring(customDimensions[\"service\"]) == \"local-llm\"\n| where message has \"Avg prompt throughput\" or severityLevel >= 2\n| project timestamp,\n    level = case(severityLevel >= 3, \"error\", severityLevel == 2, \"warning\", \"info\"),\n    Message = trim_end(@\"\\s+\", coalesce(extract(@\"(Engine \\d+: [^\\r\\n]*)\", 1, message), message))\n| order by timestamp desc\n| take 300",
+            "resources": [
+              "$appinsights"
+            ],
+            "resultFormat": "logs"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "prettifyLogMessage": false,
+        "showLabels": false,
+        "showCommonLabels": false
+      },
+      "gridPos": {
+        "x": 14,
+        "y": 147,
+        "w": 10,
+        "h": 12
       }
     }
   ]

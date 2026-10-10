@@ -434,6 +434,86 @@ ts("Export queue fill", [target('max(otelcol_exporter_queue_size / otelcol_expor
    desc="Share of the persistent sending queue in use. Growth means Azure is rejecting data or unreachable.")
 advance(8)
 
+# ---------------------------------------------------------------- Traces and logs
+# Spans and logs land in Application Insights (Log Analytics), so these panels
+# query it with KQL through the Azure Monitor data source. They project chosen
+# fields only: LLM-call spans also carry the client's tool definitions, and
+# request spans the public host name.
+AZMON = {"type": "grafana-azure-monitor-datasource", "uid": "${azmon}"}
+
+
+def kql(query, fmt="table"):
+    return {"refId": "A", "datasource": AZMON, "queryType": "Azure Log Analytics",
+            "azureLogAnalytics": {"query": query, "resources": ["$appinsights"], "resultFormat": fmt}}
+
+
+row("Traces and logs (Application Insights)")
+LLM_CALLS = """dependencies
+| where $__timeFilter(timestamp)
+| where name startswith "chat "
+| extend d = customDimensions
+| project Time = timestamp,
+    ['Result'] = iff(success, "ok", "error"),
+    ['Duration'] = duration / 1000.0,
+    ['Time to first token'] = todouble(d["gen_ai.response.time_to_first_chunk"]),
+    ['Input tokens'] = tolong(d["gen_ai.usage.input_tokens"]),
+    ['Output tokens'] = tolong(d["gen_ai.usage.output_tokens"]),
+    ['Finish reason'] = tostring(todynamic(tostring(d["gen_ai.response.finish_reasons"]))[0]),
+    ['Trace ID'] = operation_Id
+| order by Time desc
+| take 200"""
+place({"type": "table", "id": nid(), "title": "LLM calls (traces)", "datasource": AZMON,
+       "description": "One row per model call, from the LiteLLM spans in Application Insights: duration, "
+                      "time to first token, token counts and why generation stopped. Errors carry no token counts. Open the trace ID in "
+                      "Application Insights or Grafana Explore for the whole request.",
+       "targets": [kql(LLM_CALLS)],
+       "fieldConfig": {"defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}}},
+                       "overrides": [
+                           {"matcher": {"id": "byRegexp", "options": "^(Duration|Time to first token)$"},
+                            "properties": [{"id": "unit", "value": "s"}, {"id": "decimals", "value": 1}]},
+                           {"matcher": {"id": "byName", "options": "Time to first token"},
+                            "properties": [{"id": "custom.cellOptions", "value": {"type": "color-text"}},
+                                           {"id": "thresholds", "value": {"mode": "absolute", "steps": [
+                                               {"color": GOOD, "value": None}, {"color": WARN, "value": 10},
+                                               {"color": BAD, "value": 30}]}}]},
+                           {"matcher": {"id": "byName", "options": "Input tokens"},
+                            "properties": [{"id": "unit", "value": "short"}, {"id": "min", "value": 0},
+                                           {"id": "max", "value": 262144},
+                                           {"id": "custom.cellOptions",
+                                            "value": {"type": "gauge", "mode": "basic", "valueDisplayMode": "text"}},
+                                           {"id": "color", "value": {"mode": "fixed", "fixedColor": "blue"}}]},
+                           {"matcher": {"id": "byName", "options": "Output tokens"},
+                            "properties": [{"id": "unit", "value": "short"}]},
+                           {"matcher": {"id": "byName", "options": "Result"},
+                            "properties": [{"id": "custom.cellOptions", "value": {"type": "color-text"}},
+                                           {"id": "custom.width", "value": 90},
+                                           {"id": "mappings", "value": [{"type": "value", "options": {
+                                               "ok": {"color": GOOD, "index": 0},
+                                               "error": {"color": BAD, "index": 1}}}]}]},
+                           {"matcher": {"id": "byName", "options": "Trace ID"},
+                            "properties": [{"id": "custom.width", "value": 300}]}]},
+       "options": {"showHeader": True, "cellHeight": "sm", "footer": {"show": False}}},
+      0, 14, 12)
+ENGINE_LOG = r"""traces
+| where $__timeFilter(timestamp)
+| where tostring(customDimensions["service"]) == "local-llm"
+| where message has "Avg prompt throughput" or severityLevel >= 2
+| project timestamp,
+    level = case(severityLevel >= 3, "error", severityLevel == 2, "warning", "info"),
+    Message = trim_end(@"\s+", coalesce(extract(@"(Engine \d+: [^\r\n]*)", 1, message), message))
+| order by timestamp desc
+| take 300"""
+place({"type": "logs", "id": nid(), "title": "Model server log (vLLM engine stats and warnings)",
+       "datasource": AZMON,
+       "description": "vLLM's own log lines from the model container, shipped by the collector's filelog "
+                      "receiver: the engine stats it prints every 10 seconds, plus any warning or error.",
+       "targets": [kql(ENGINE_LOG, "logs")],
+       "options": {"showTime": True, "wrapLogMessage": True, "sortOrder": "Descending",
+                   "enableLogDetails": True, "dedupStrategy": "none", "prettifyLogMessage": False,
+                   "showLabels": False, "showCommonLabels": False}},
+      14, 10, 12)
+advance(12)
+
 # Token prices default to Alibaba's own price for qwen/qwen3.8-27b on OpenRouter
 # (2026-10-09, https://openrouter.ai/api/v1/models/qwen/qwen3.8-27b/endpoints),
 # the price on the model page. The median of its 19 providers was
@@ -456,6 +536,12 @@ def textbox(name, label, default):
             "options": [{"selected": True, "text": default, "value": default}]}
 
 
+AZMON_VAR = {"type": "datasource", "name": "azmon", "label": "Azure Monitor", "query": "grafana-azure-monitor-datasource",
+             "hide": 0, "refresh": 1, "regex": "", "current": {}, "options": []}
+# Application Insights resource ID for the traces and logs panels (hidden; set it under Settings > Variables).
+APPINSIGHTS_VAR = dict(textbox("appinsights", "Application Insights", '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>'), hide=2)
+
+
 dashboard = {
     "uid": "h100-llm",
     "title": "h100-llm",
@@ -467,7 +553,7 @@ dashboard = {
     "refresh": "30s",
     "time": {"from": "now-6h", "to": "now"},
     "schemaVersion": 39,
-    "templating": {"list": [DATASOURCE] + [textbox(*v) for v in VARIABLES]},
+    "templating": {"list": [DATASOURCE] + [textbox(*v) for v in VARIABLES] + [AZMON_VAR, APPINSIGHTS_VAR]},
     "annotations": {"list": []},
     "links": [],
     "panels": panels,
