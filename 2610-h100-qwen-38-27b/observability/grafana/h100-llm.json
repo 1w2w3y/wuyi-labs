@@ -4879,7 +4879,7 @@
           },
           "queryType": "Azure Log Analytics",
           "azureLogAnalytics": {
-            "query": "dependencies\n| where $__timeFilter(timestamp)\n| where name startswith \"chat \"\n| extend d = customDimensions\n| project Time = timestamp,\n    ['Result'] = iff(success, \"ok\", \"error\"),\n    ['Duration'] = duration / 1000.0,\n    ['Time to first token'] = todouble(d[\"gen_ai.response.time_to_first_chunk\"]),\n    ['Input tokens'] = tolong(d[\"gen_ai.usage.input_tokens\"]),\n    ['Output tokens'] = tolong(d[\"gen_ai.usage.output_tokens\"]),\n    ['Finish reason'] = tostring(todynamic(tostring(d[\"gen_ai.response.finish_reasons\"]))[0]),\n    ['Trace ID'] = operation_Id\n| order by Time desc\n| take 200",
+            "query": "dependencies\n| where $__timeFilter(timestamp)\n| where name startswith \"chat \"\n| extend d = customDimensions\n| project Time = timestamp,\n    ['Result'] = iff(tobool(success), \"ok\", \"error\"),\n    ['Duration'] = duration / 1000.0,\n    ['Time to first token'] = todouble(d[\"gen_ai.response.time_to_first_chunk\"]),\n    ['Input tokens'] = tolong(d[\"gen_ai.usage.input_tokens\"]),\n    ['Output tokens'] = tolong(d[\"gen_ai.usage.output_tokens\"]),\n    ['Finish reason'] = tostring(todynamic(tostring(d[\"gen_ai.response.finish_reasons\"]))[0]),\n    ['Trace ID'] = operation_Id\n| order by Time desc\n| take 200",
             "resources": [
               "$appinsights"
             ],
@@ -5076,7 +5076,7 @@
           },
           "queryType": "Azure Log Analytics",
           "azureLogAnalytics": {
-            "query": "traces\n| where $__timeFilter(timestamp)\n| where tostring(customDimensions[\"service\"]) == \"local-llm\"\n| where message has \"Avg prompt throughput\" or severityLevel >= 2\n| project timestamp,\n    level = case(severityLevel >= 3, \"error\", severityLevel == 2, \"warning\", \"info\"),\n    Message = trim_end(@\"\\s+\", coalesce(extract(@\"(Engine \\d+: [^\\r\\n]*)\", 1, message), message))\n| order by timestamp desc\n| take 300",
+            "query": "traces\n| where $__timeFilter(timestamp)\n| where tostring(customDimensions[\"service\"]) == \"local-llm\"\n| where message has \"Avg prompt throughput\" or severityLevel >= 2\n| project timestamp,\n    Message = trim_end(@\"\\s+\", coalesce(extract(@\"(Engine \\d+: [^\\r\\n]*)\", 1, message), message)),\n    level = case(severityLevel >= 3, \"error\", severityLevel == 2, \"warning\", \"info\")\n| order by timestamp desc\n| take 300",
             "resources": [
               "$appinsights"
             ],

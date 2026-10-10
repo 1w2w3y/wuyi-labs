@@ -453,7 +453,7 @@ LLM_CALLS = """dependencies
 | where name startswith "chat "
 | extend d = customDimensions
 | project Time = timestamp,
-    ['Result'] = iff(success, "ok", "error"),
+    ['Result'] = iff(tobool(success), "ok", "error"),
     ['Duration'] = duration / 1000.0,
     ['Time to first token'] = todouble(d["gen_ai.response.time_to_first_chunk"]),
     ['Input tokens'] = tolong(d["gen_ai.usage.input_tokens"]),
@@ -499,8 +499,8 @@ ENGINE_LOG = r"""traces
 | where tostring(customDimensions["service"]) == "local-llm"
 | where message has "Avg prompt throughput" or severityLevel >= 2
 | project timestamp,
-    level = case(severityLevel >= 3, "error", severityLevel == 2, "warning", "info"),
-    Message = trim_end(@"\s+", coalesce(extract(@"(Engine \d+: [^\r\n]*)", 1, message), message))
+    Message = trim_end(@"\s+", coalesce(extract(@"(Engine \d+: [^\r\n]*)", 1, message), message)),
+    level = case(severityLevel >= 3, "error", severityLevel == 2, "warning", "info")
 | order by timestamp desc
 | take 300"""
 place({"type": "logs", "id": nid(), "title": "Model server log (vLLM engine stats and warnings)",
