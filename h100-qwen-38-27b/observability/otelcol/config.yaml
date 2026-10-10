@@ -1,0 +1,329 @@
+# OpenTelemetry Collector (contrib) for the H100 stack. Every signal goes to
+# Application Insights through its OTLP ingestion endpoints:
+#   traces, logs -> DCE logs ingest -> DCR -> Log Analytics (App Insights)
+#   metrics      -> DCE metrics ingest -> DCR -> Azure Monitor workspace
+# Auth: the VM's regional user-assigned identity (Monitoring Metrics Publisher
+# on the DCR) through the azure_auth extension. No secrets on disk.
+# All ${env:...} values come from compose.observability.yaml / .env.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage:
+    directory: /var/lib/otelcol
+    create_directory: true
+  azure_auth:
+    managed_identity:
+      client_id: ${env:TELEMETRY_UAMI_CLIENT_ID}
+    scopes:
+      - https://monitor.azure.com/.default
+
+receivers:
+  # LiteLLM GenAI spans (OTEL_ENDPOINT=http://otel-collector:4318).
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+  # Static targets on the compose network. upstream_model is added to every
+  # series by transform/model below.
+  prometheus:
+    config:
+      global:
+        scrape_interval: 15s
+        scrape_timeout: 10s
+      scrape_configs:
+        - job_name: vllm
+          static_configs:
+            - targets: ["qwen3.8-27b:8080"]
+              labels: {service: local-llm}
+        - job_name: litellm
+          metrics_path: /metrics/
+          static_configs:
+            - targets: ["litellm:4000"]
+              labels: {service: litellm-gateway}
+        - job_name: dcgm
+          static_configs:
+            - targets: ["dcgm-exporter:9400"]
+              labels: {service: gpu}
+        - job_name: otelcol
+          static_configs:
+            - targets: ["127.0.0.1:8888"]
+              labels: {service: otel-collector}
+
+  # Container CPU / memory / network / blkio. Docker 29 rejects API versions
+  # below 1.44.
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    api_version: "1.47"
+    collection_interval: 30s
+    # At boot dockerd is still starting every container, and the initial
+    # container list took longer than the 5 s default: the receiver failed to
+    # start and took the whole collector down until Docker restarted it.
+    timeout: 30s
+    metrics:
+      container.restarts: {enabled: true}
+      container.uptime: {enabled: true}
+      container.pids.count: {enabled: true}
+
+  host_metrics:
+    root_path: /hostfs
+    collection_interval: 30s
+    # The *.utilization metrics (0-1 ratios) are off by default; without them
+    # CPU and memory percentages have to be derived from cpu.time and usage.
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization: {enabled: true}
+          system.cpu.physical.count: {enabled: true}
+      load: {}
+      memory:
+        metrics:
+          system.memory.utilization: {enabled: true}
+          system.memory.limit: {enabled: true}
+      system: {}
+      processes: {}
+      network: {}
+      paging: {}
+      disk: {}
+      filesystem:
+        metrics:
+          system.filesystem.utilization: {enabled: true}
+        exclude_mount_points:
+          mount_points: ["/dev/*", "/proc/*", "/sys/*", "/run/*", "/snap/*", "/var/lib/docker/*", "/data/docker/*", "/hostfs/dev/*", "/hostfs/proc/*", "/hostfs/sys/*", "/hostfs/run/*", "/hostfs/snap/*", "/hostfs/data/docker/*"]
+          match_type: strict
+        exclude_fs_types:
+          fs_types: [autofs, binfmt_misc, bpf, cgroup2, configfs, debugfs, devpts, devtmpfs, fusectl, hugetlbfs, mqueue, nsfs, overlay, proc, procfs, pstore, rpc_pipefs, securityfs, selinuxfs, squashfs, sysfs, tracefs, tmpfs]
+          match_type: strict
+
+  # Docker json-file logs. Each line is
+  #   {"log":"...","stream":"stderr","attrs":{<labels>},"time":"..."}
+  # and attrs carries the compose service and observability.* labels
+  # (labels-regex in the compose logging options).
+  file_log:
+    include: [/var/lib/docker/containers/*/*-json.log]
+    start_at: beginning
+    include_file_path: true
+    storage: file_storage
+    max_log_size: 1MiB
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout_type: gotime
+          layout: "2006-01-02T15:04:05.999999999Z07:00"
+      - type: move
+        from: attributes.log
+        to: body
+      - type: move
+        from: attributes.stream
+        to: attributes["log.iostream"]
+      # Severity from the level token: vLLM "(EngineCore pid=1) INFO 10-03 ...",
+      # uvicorn "INFO:     ...", otelcol "<time> TAB warn TAB ...". Other lines
+      # keep no severity.
+      - type: regex_parser
+        id: level
+        parse_from: body
+        regex: '^(?:\([^)]*\)\s+|\S+\t)?(?P<level>DEBUG|INFO|WARNING|ERROR|CRITICAL|debug|info|warn|error)[\s:]'
+        on_error: send_quiet
+        severity:
+          parse_from: attributes.level
+          mapping:
+            warn: [WARNING, warn]
+            fatal: [CRITICAL]
+      # logfmt: dcgm-exporter "level=INFO", ngrok "lvl=eror".
+      - type: regex_parser
+        id: level_logfmt
+        parse_from: body
+        regex: '(?:^|\s)(?:lvl|level)=(?P<level>[A-Za-z]+)'
+        on_error: send_quiet
+        severity:
+          parse_from: attributes.level
+          mapping:
+            debug: [DEBUG, debug, dbug]
+            info: [INFO, info]
+            warn: [WARN, WARNING, warn, warning]
+            error: [ERROR, error, eror]
+            fatal: [crit]
+      - type: remove
+        if: 'attributes.level != nil'
+        field: attributes.level
+      - type: move
+        if: 'attributes.attrs != nil and attributes.attrs["com.docker.compose.service"] != nil'
+        from: attributes.attrs["com.docker.compose.service"]
+        to: attributes["container.name"]
+      - type: move
+        if: 'attributes.attrs != nil and attributes.attrs["observability.service"] != nil'
+        from: attributes.attrs["observability.service"]
+        to: attributes["service"]
+      - type: move
+        if: 'attributes.attrs != nil and attributes.attrs["observability.model"] != nil'
+        from: attributes.attrs["observability.model"]
+        to: attributes["upstream_model"]
+      - type: remove
+        if: 'attributes.attrs != nil'
+        field: attributes.attrs
+      - type: remove
+        field: attributes.time
+      # LiteLLM completion events are single-line JSON with trace_id/span_id:
+      # parse them so App Insights links the log to its request trace.
+      - type: json_parser
+        id: litellm_event
+        if: 'body matches "^\\{\"call_id\""'
+        parse_from: body
+        parse_to: attributes["litellm"]
+      - type: trace_parser
+        if: 'attributes.litellm != nil and attributes.litellm.trace_id != nil'
+        trace_id:
+          parse_from: attributes.litellm.trace_id
+        span_id:
+          parse_from: attributes.litellm.span_id
+
+  # Host logs: syslog (kernel incl. NVIDIA Xid / NVRM lines, systemd, the
+  # Azure agent, OOM kills) and the boot-time compose-up unit's log.
+  # Ubuntu 24.04 rsyslog lines look like
+  #   2026-10-03T21:37:27.123456+00:00 vm-llm-h100-sea-z2-261009 kernel: NVRM: Xid ...
+  file_log/host:
+    include: [/hostfs/var/log/syslog, /hostfs/var/log/llm-compose-up.log]
+    start_at: beginning
+    storage: file_storage
+    max_log_size: 1MiB
+    operators:
+      - type: add
+        field: attributes.service
+        value: host
+      - type: regex_parser
+        id: syslog
+        if: 'attributes["log.file.name"] == "syslog"'
+        regex: '^(?P<time>\d{4}-\d\d-\d\dT\S+) \S+ (?P<program>[^\[:\s]+)(?:\[(?P<pid>\d+)\])?: (?P<message>.*)$'
+        timestamp:
+          parse_from: attributes.time
+          layout_type: gotime
+          layout: "2006-01-02T15:04:05.999999Z07:00"
+        on_error: send_quiet
+      - type: move
+        if: 'attributes.message != nil'
+        from: attributes.message
+        to: body
+      - type: remove
+        if: 'attributes.time != nil'
+        field: attributes.time
+      # rsyslog's format carries no level, so every host line would arrive
+      # unleveled. Mark the kernel lines that alerts care about: GPU Xid
+      # errors and OOM kills as errors, hung tasks and segfaults as warnings.
+      - type: add
+        if: 'attributes.program == "kernel" and body matches "NVRM: Xid|Out of memory: Killed process|oom-kill:"'
+        field: attributes.level
+        value: error
+      - type: add
+        if: 'attributes.program == "kernel" and attributes.level == nil and body matches "blocked for more than [0-9]+ seconds|segfault at"'
+        field: attributes.level
+        value: warn
+      - type: severity_parser
+        if: 'attributes.level != nil'
+        parse_from: attributes.level
+      - type: remove
+        if: 'attributes.level != nil'
+        field: attributes.level
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  # Health checks and scrapes are most of the log volume.
+  filter/logs:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'IsMatch(body, "\"GET /(health|metrics|ping)[^\"]*HTTP/1\\.1\" 200")'
+        - 'IsMatch(body, "GET /health/liveliness")'
+        - 'IsMatch(body, "^\\s*$")'
+        # docker pull progress in llm-compose-up.log
+        - 'attributes["service"] == "host" and IsMatch(body, "^\\s*[0-9a-f]{12} (Downloading|Extracting|Waiting|Verifying Checksum|Download complete|Pull complete|Pulling fs layer|Already exists)")'
+
+  # host.name (VM name), cloud.region, azure.vm.* from IMDS.
+  resource_detection:
+    detectors: [azure]
+    timeout: 5s
+    override: false
+
+  resource:
+    attributes:
+      - {key: microsoft.applicationId, value: "${env:AZMON_APPLICATION_ID}", action: upsert}
+      - {key: service.namespace, value: llm-self-hosting, action: upsert}
+      - {key: deployment.environment.name, value: "${env:DEPLOYMENT_ENVIRONMENT}", action: upsert}
+
+  # Logs and scraped metrics have no service.name of their own.
+  resource/default_service:
+    attributes:
+      - {key: service.name, value: h100-host, action: insert}
+
+  # The metrics DCR keeps only service.*, host.name and cloud.region from the
+  # resource, so docker_stats series from different containers would merge.
+  # Carry the container name as a data point label instead.
+  transform/container_name:
+    error_mode: ignore
+    metric_statements:
+      - set(datapoint.attributes["container.name"], resource.attributes["container.name"]) where resource.attributes["container.name"] != nil
+
+  # The model the stack serves (LLM_MODEL in .env), on every signal, so runs
+  # of different models on the same VM type can be split apart: GPU, host and
+  # container series too, not only the model server's. A data point label,
+  # since the metrics DCR drops other resource attributes. Values already set
+  # (the observability.model container label on logs) are kept.
+  transform/model:
+    error_mode: ignore
+    metric_statements:
+      - set(datapoint.attributes["upstream_model"], "${env:LLM_MODEL}") where datapoint.attributes["upstream_model"] == nil
+    log_statements:
+      - set(log.attributes["upstream_model"], "${env:LLM_MODEL}") where log.attributes["upstream_model"] == nil
+    trace_statements:
+      - set(span.attributes["upstream_model"], "${env:LLM_MODEL}") where span.attributes["upstream_model"] == nil
+
+  batch:
+    send_batch_size: 2048
+    timeout: 10s
+
+exporters:
+  otlp_http/azuremonitor:
+    traces_endpoint: ${env:AZMON_TRACES_ENDPOINT}
+    logs_endpoint: ${env:AZMON_LOGS_ENDPOINT}
+    metrics_endpoint: ${env:AZMON_METRICS_ENDPOINT}
+    auth:
+      authenticator: azure_auth
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 30m
+    sending_queue:
+      enabled: true
+      storage: file_storage
+
+service:
+  extensions: [health_check, file_storage, azure_auth]
+  telemetry:
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource_detection, resource, transform/model, batch]
+      exporters: [otlp_http/azuremonitor]
+    metrics:
+      receivers: [otlp, prometheus, docker_stats, host_metrics]
+      processors: [memory_limiter, resource_detection, resource, resource/default_service, transform/container_name, transform/model, batch]
+      exporters: [otlp_http/azuremonitor]
+    logs:
+      receivers: [otlp, file_log, file_log/host]
+      processors: [memory_limiter, filter/logs, resource_detection, resource, resource/default_service, transform/model, batch]
+      exporters: [otlp_http/azuremonitor]

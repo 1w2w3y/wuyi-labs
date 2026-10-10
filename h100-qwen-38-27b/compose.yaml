@@ -1,0 +1,153 @@
+# Core stack on the Azure H100 VM: pinned model download -> vLLM -> LiteLLM.
+# Overlays: compose.observability.yaml (telemetry), compose.ngrok.yaml (public URL).
+# Every port binds to 127.0.0.1; the VM itself has no public IP.
+name: llm
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+    # Copied into each json-file log line's "attrs", where the collector's
+    # filelog receiver reads the service name (compose.observability.yaml).
+    labels-regex: '^(observability\.|com\.docker\.compose\.service$)'
+
+services:
+  # One-shot job: fetch the pinned checkpoint into /data/models. Uses the vLLM
+  # image's bundled `hf` CLI, so no extra image is needed. Re-runs only verify
+  # the local copy.
+  model-download:
+    image: nvcr.io/nvidia/vllm:26.07-py3@sha256:95c498a475142c20c989c65e5d223348c09fed83ba17ddf44f117610c0bd3268
+    container_name: llm-model-download
+    environment:
+      HF_TOKEN: "${HF_TOKEN:-}"
+      HF_XET_HIGH_PERFORMANCE: "1"
+    command:
+      - bash
+      - -c
+      - >-
+        hf download "${MODEL_REPO:-Qwen/Qwen3.8-27B-FP8}"
+        --revision "${MODEL_REVISION:-017b9c7af6b5689d5dd426a76e0bc077eb5ca20a}"
+        --local-dir "/models/${MODEL_DIR:-Qwen3.8-27B-FP8}"
+    volumes:
+      - /data/models:/models
+    logging: *logging
+    restart: "no"
+
+  qwen3.8-27b:
+    image: local/vllm:26.07-xgrammar0.2.3
+    build:
+      context: images/vllm
+    container_name: qwen3.8-27b
+    depends_on:
+      model-download:
+        condition: service_completed_successfully
+    gpus: all
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - /data/models:/models:ro
+      - /data/vllm-cache:/root/.cache/vllm
+    command:
+      - python3
+      - -m
+      - vllm.entrypoints.openai.api_server
+      # Official FP8 checkpoint (E4M3, 128x128 block scales, dynamic
+      # activations); vLLM reads its quantization_config, so no --quantization
+      # flag. Embeddings, lm_head, linear-attention gates and the vision tower
+      # stay BF16. H100 runs FP8 natively; it has no FP4 tensor cores.
+      - --model
+      - /models/${MODEL_DIR:-Qwen3.8-27B-FP8}
+      - --served-model-name
+      - qwen3.8-27b
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --trust-remote-code
+      # Native 262K window; the 94-GB H100 NVL has room for it.
+      - --max-model-len
+      - "${QWEN38_27B_CONTEXT_SIZE:-262144}"
+      - --gpu-memory-utilization
+      - "${QWEN38_27B_GPU_MEMORY_UTILIZATION:-0.93}"
+      - --max-num-seqs
+      - "${QWEN38_27B_MAX_NUM_SEQS:-32}"
+      - --max-num-batched-tokens
+      - "${QWEN38_27B_MAX_NUM_BATCHED_TOKENS:-16384}"
+      - --kv-cache-dtype
+      - fp8
+      - --enable-prefix-caching
+      - --spec-method
+      - mtp
+      - --spec-tokens
+      - "${QWEN38_27B_SPEC_TOKENS:-3}"
+      - --limit-mm-per-prompt
+      - '{"image":{"count":4,"width":1024,"height":1024},"video":0}'
+      - --reasoning-parser
+      - qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+    labels:
+      observability.logs: "true"
+      observability.service: "local-llm"
+      observability.model: "${LLM_MODEL:-qwen3.8-27b}"
+    ports:
+      - "127.0.0.1:8096:8080"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=10)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20m
+    logging: *logging
+    restart: unless-stopped
+    stop_grace_period: 2m
+    init: true
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd
+    container_name: llm-litellm
+    depends_on:
+      qwen3.8-27b:
+        condition: service_healthy
+    command:
+      - --config=/app/config.yaml
+      - --log_config=/app/uvicorn_logging.json
+    environment:
+      LITELLM_UPSTREAM_MODEL: openai/qwen3.8-27b
+      LITELLM_UPSTREAM_API_BASE: http://qwen3.8-27b:8080/v1
+      LITELLM_ACTIVE_MODEL: qwen3.8-27b
+      OTEL_EXPORTER: "${LITELLM_OTEL_EXPORTER:-otlp_http}"
+      OTEL_ENDPOINT: "${LITELLM_OTEL_ENDPOINT:-http://otel-collector:4318/v1/traces}"
+      OTEL_SERVICE_NAME: azure-litellm
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "${LITELLM_OTEL_CAPTURE_MESSAGE_CONTENT:-NO_CONTENT}"
+      LITELLM_OTEL_V2: "true"
+      OTEL_DEBUG: "${LITELLM_OTEL_DEBUG:-false}"
+    labels:
+      observability.logs: "true"
+      observability.service: "litellm-gateway"
+      observability.model: "${LLM_MODEL:-qwen3.8-27b}"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+      - ./litellm/request_log_callback.py:/app/request_log_callback.py:ro
+      - ./litellm/uvicorn_logging.json:/app/uvicorn_logging.json:ro
+    ports:
+      - "127.0.0.1:4000:4000"
+      # docker0's address, so agent-eval task containers (scripts/eval-agent.sh)
+      # can reach the gateway. Only the host and its containers see it.
+      - "172.17.0.1:4000:4000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging: *logging
+    restart: unless-stopped
+    init: true
