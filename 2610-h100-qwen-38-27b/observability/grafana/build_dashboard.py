@@ -538,11 +538,20 @@ def textbox(name, label, default):
 
 AZMON_VAR = {"type": "datasource", "name": "azmon", "label": "Azure Monitor", "query": "grafana-azure-monitor-datasource",
              "hide": 0, "refresh": 1, "regex": "", "current": {}, "options": []}
-# Application Insights resource ID for the traces and logs panels (hidden; set it under Settings > Variables).
-APPINSIGHTS_VAR = dict(textbox("appinsights", "Application Insights", '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>'), hide=2)
+# Application Insights resource ID for the traces and logs panels. Grafana's Import dialog asks for it
+# (the VAR_APPINSIGHTS input) and writes it into this hidden constant variable.
+APPINSIGHTS_VAR = {"type": "constant", "name": "appinsights", "label": "Application Insights", "hide": 2,
+                   "query": "${VAR_APPINSIGHTS}",
+                   "current": {"text": "${VAR_APPINSIGHTS}", "value": "${VAR_APPINSIGHTS}"},
+                   "options": [{"selected": True, "text": "${VAR_APPINSIGHTS}", "value": "${VAR_APPINSIGHTS}"}]}
+INPUTS = [{"name": "VAR_APPINSIGHTS", "type": "constant", "label": "Application Insights resource ID",
+           "description": "The Application Insights resource with OTLP support that receives the traces and logs",
+           "value": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>"
+                    "/providers/Microsoft.Insights/components/<application-insights>"}]
 
 
 dashboard = {
+    "__inputs": INPUTS,
     "uid": "h100-llm",
     "title": "h100-llm",
     "description": "Self-hosted Qwen3.8-27B on an Azure Spot H100 VM: token throughput and economics, gateway traffic, vLLM serving, GPU, host and telemetry pipeline.",

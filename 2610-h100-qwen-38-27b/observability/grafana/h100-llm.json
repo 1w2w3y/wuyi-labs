@@ -1,4 +1,13 @@
 {
+  "__inputs": [
+    {
+      "name": "VAR_APPINSIGHTS",
+      "type": "constant",
+      "label": "Application Insights resource ID",
+      "description": "The Application Insights resource with OTLP support that receives the traces and logs",
+      "value": "/subscriptions/<subscription-id>/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>"
+    }
+  ],
   "uid": "h100-llm",
   "title": "h100-llm",
   "description": "Self-hosted Qwen3.8-27B on an Azure Spot H100 VM: token throughput and economics, gateway traffic, vLLM serving, GPU, host and telemetry pipeline.",
@@ -113,20 +122,20 @@
         "options": []
       },
       {
-        "type": "textbox",
+        "type": "constant",
         "name": "appinsights",
         "label": "Application Insights",
-        "query": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>",
         "hide": 2,
+        "query": "${VAR_APPINSIGHTS}",
         "current": {
-          "text": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>",
-          "value": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>"
+          "text": "${VAR_APPINSIGHTS}",
+          "value": "${VAR_APPINSIGHTS}"
         },
         "options": [
           {
             "selected": true,
-            "text": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>",
-            "value": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/<resource-group>/providers/Microsoft.Insights/components/<application-insights>"
+            "text": "${VAR_APPINSIGHTS}",
+            "value": "${VAR_APPINSIGHTS}"
           }
         ]
       }
