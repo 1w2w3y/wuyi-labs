@@ -201,9 +201,9 @@ text("Assumptions",
      "| Input (computed) | **${price_input}** per 1M tokens |\n"
      "| Input (prefix-cache hit) | **${price_cached_input}** per 1M tokens |\n"
      "| Output | **${price_output}** per 1M tokens |\n\n"
-     "Token prices default to Alibaba's own Qwen3.8 27B price on OpenRouter (2026-10-09): "
-     "$0.425 input, $0.085 cached input, $2.55 output. The median of its 19 providers was "
-     "$0.225, $0.0375 and $2.30.\n\n"
+     "Token prices default to a public list price for Qwen3.8-27B in October 2026: "
+     "$0.425 per 1M input tokens, $0.085 cached input and $2.55 output. Set them to the "
+     "prices you want to compare against.\n\n"
      "Token counts come from vLLM. Output includes reasoning tokens. VM hours count only "
      "minutes in which the model server answered its scrape.\n\n"
      f"Capacity reference (benchmark, real text, 512-token replies): about **1,550 output tokens/s** "
@@ -514,10 +514,7 @@ place({"type": "logs", "id": nid(), "title": "Model server log (vLLM engine stat
       14, 10, 12)
 advance(12)
 
-# Token prices default to Alibaba's own price for qwen/qwen3.8-27b on OpenRouter
-# (2026-10-09, https://openrouter.ai/api/v1/models/qwen/qwen3.8-27b/endpoints),
-# the price on the model page. The median of its 19 providers was
-# $0.225 / $0.0375 / $2.30 (input / cached input / output).
+# Token prices default to a public list price for Qwen3.8-27B in October 2026.
 VARIABLES = [  # name, label, default (USD); edit them at the top of the dashboard
     ("vm_usd_per_hour", "VM $/hour", "2"),
     ("price_input", "Input $/1M", "0.425"),

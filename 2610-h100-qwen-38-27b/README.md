@@ -1,6 +1,6 @@
-# Qwen3.8-27B on an Azure Spot H100
+# Qwen3.8-27B on an H100 Azure Spot VM
 
-Sample code for the blog post *Qwen3.8-27B on a $2 Azure Spot H100: does it pay off?*
+Sample code for the blog post *Qwen3.8-27B on a $2 H100 Azure Spot VM: does it pay off?*
 
 It serves [Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B-FP8) (official FP8 checkpoint) from one
 `Standard_NC40ads_H100_v5` VM (1x H100 NVL, 94 GB) on
@@ -110,7 +110,7 @@ If your Azure Monitor workspace data source uses the Azure Monitor Managed Servi
 
 The **Token economics** row compares what the
 tokens served would sell for, at the price variables at the top of the dashboard, with the VM price per
-hour. The defaults are a $2 VM hour and the Qwen3.8-27B list price on OpenRouter on 2026-10-09
+hour. The defaults are a $2 VM hour and a public list price for Qwen3.8-27B in October 2026
 ($0.425 per 1M input tokens, $0.085 cached input, $2.55 output); change them to your own.
 
 The **Traces and logs** row reads Application Insights with KQL through the Azure Monitor data source: one
