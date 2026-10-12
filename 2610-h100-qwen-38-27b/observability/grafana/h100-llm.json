@@ -493,7 +493,7 @@
       "type": "stat",
       "id": 7,
       "title": "Request tok/s",
-      "description": "Output tokens per second one request sees now (1 / median inter-token latency).",
+      "description": "Output tokens per second one request sees now: the output rate divided by the requests running.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -504,7 +504,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "1 / histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[2m])))",
+          "expr": "(sum(rate(vllm:generation_tokens_total[2m])) > 0) / clamp_min(sum(avg_over_time(vllm:num_requests_running[2m])), 1)",
           "legendFormat": "__auto",
           "refId": "A",
           "instant": true,
@@ -1921,7 +1921,7 @@
       "type": "stat",
       "id": 30,
       "title": "Peak per-request output/s",
-      "description": "Highest 1-minute median speed one request saw in the selected range (1 / median inter-token latency). About 166 tok/s is the ceiling with no other load; long prompts being prefilled at the same time pull it down. Per-request maxima from the histograms are skewed by very short replies, so this uses the median.",
+      "description": "Highest 1-minute speed one request saw in the selected range: the output rate divided by the requests running. About 166 tok/s is the ceiling with no other load; more requests at once, long contexts and prompts being prefilled at the same time pull it down.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1932,7 +1932,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max_over_time((1 / histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[1m]))))[$__range:15s])",
+          "expr": "max_over_time(((sum(rate(vllm:generation_tokens_total[1m])) > 0) / clamp_min(sum(avg_over_time(vllm:num_requests_running[1m])), 1))[$__range:15s])",
           "legendFormat": "__auto",
           "refId": "A",
           "instant": true,
@@ -1985,7 +1985,7 @@
       "type": "timeseries",
       "id": 31,
       "title": "Per-request output speed",
-      "description": "Output tokens per second one request sees: 1 / inter-token latency. Falls as concurrency and prefill load rise.",
+      "description": "Output tokens per second one request sees: the output rate divided by the requests running. Falls as concurrency, context length and prefill load rise.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1996,18 +1996,9 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "1 / histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[$__rate_interval])))",
-          "legendFormat": "median request",
+          "expr": "(sum(rate(vllm:generation_tokens_total[$__rate_interval])) > 0) / clamp_min(sum(avg_over_time(vllm:num_requests_running[$__rate_interval])), 1)",
+          "legendFormat": "per running request",
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "1 / histogram_quantile(0.95, sum(rate(vllm:inter_token_latency_seconds[$__rate_interval])))",
-          "legendFormat": "slow requests (p95 latency)",
-          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -3145,8 +3136,8 @@
     {
       "type": "timeseries",
       "id": 48,
-      "title": "Time per output token",
-      "description": "Gap between output tokens during decode. Rises with concurrency.",
+      "title": "Decode time per request",
+      "description": "Time from a request's first output token to its last, measured by vLLM: end-to-end latency minus time to first token. Long replies and reasoning dominate it; per-token speed is under Throughput.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -3157,7 +3148,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum(rate(vllm:request_decode_time_seconds[$__rate_interval])))",
           "legendFormat": "p50",
           "refId": "A"
         },
@@ -3166,7 +3157,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(vllm:inter_token_latency_seconds[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum(rate(vllm:request_decode_time_seconds[$__rate_interval])))",
           "legendFormat": "p95",
           "refId": "B"
         }

@@ -129,7 +129,19 @@ NOW = "2m"
 IN_C = 'vllm:prompt_tokens_by_source_total{source="local_compute"}'
 IN_H = 'vllm:prompt_tokens_by_source_total{source="local_cache_hit"}'
 OUT = 'vllm:generation_tokens_total'
+RUNNING = 'vllm:num_requests_running'
 MAX_SEQS = 32  # vLLM --max-num-seqs (QWEN38_27B_MAX_NUM_SEQS in .env)
+
+
+def per_request(window):
+    """Output tokens per second one request sees: the output rate divided by the
+    requests running (empty while idle). The 15 s scrape misses requests that
+    start and end between samples, so the divisor counts at least one request;
+    otherwise a minute of short requests reads several times the real speed.
+    Not 1 / inter-token latency: vLLM records that once per decode step (~2-3
+    tokens with MTP), and nearly every step lands in its 10-25 ms bucket, so its
+    quantiles read the bucket middle (17.5 ms, "57 tok/s") whatever the speed."""
+    return f'(sum(rate({OUT}[{window}])) > 0) / clamp_min(sum(avg_over_time({RUNNING}[{window}])), 1)'
 
 # ---------------------------------------------------------------- Overview
 row("Overview")
@@ -145,9 +157,8 @@ stat("Output tokens/s", f'sum(rate({OUT}[{NOW}]))', "short", 9, w=3, decimals=0,
      desc="Generated (output) tokens per second across all requests now.")
 stat("Total tokens/s", f'sum(rate(vllm:prompt_tokens_total[{NOW}])) + sum(rate({OUT}[{NOW}]))', "short", 12, w=3,
      decimals=0, no_value="0", desc="Input plus output tokens per second now.")
-stat("Request tok/s", f'1 / histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[{NOW}])))',
-     "short", 15, w=3, decimals=0, no_value="Idle",
-     desc="Output tokens per second one request sees now (1 / median inter-token latency).")
+stat("Request tok/s", per_request(NOW), "short", 15, w=3, decimals=0, no_value="Idle",
+     desc="Output tokens per second one request sees now: the output rate divided by the requests running.")
 stat("Concurrency", 'sum(vllm:num_requests_running)', "short", 18, w=3, decimals=0, no_value="0",
      thresholds=[{"color": "blue", "value": None}, {"color": WARN, "value": MAX_SEQS}],
      desc=f"Requests vLLM is serving now. The server runs at most {MAX_SEQS} at once (--max-num-seqs); more wait in the queue.")
@@ -246,16 +257,15 @@ ts("Input tokens per second", [
 ts("Output tokens per second", [target(f'sum(rate({OUT}[{RI}]))', "all requests")],
    "short", 12, desc="Generated tokens per second summed over every running request.")
 advance(8)
-stat("Peak per-request output/s",
-     'max_over_time((1 / histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[1m]))))[$__range:15s])',
+stat("Peak per-request output/s", f'max_over_time(({per_request("1m")})[$__range:15s])',
      "short", 0, w=4, h=9, decimals=0,
-     desc="Highest 1-minute median speed one request saw in the selected range (1 / median inter-token latency). "
-          "About 166 tok/s is the ceiling with no other load; long prompts being prefilled at the same time pull it down. "
-          "Per-request maxima from the histograms are skewed by very short replies, so this uses the median.")
-ts("Per-request output speed", [
-    target(f'1 / histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[{RI}])))', "median request"),
-    target(f'1 / histogram_quantile(0.95, sum(rate(vllm:inter_token_latency_seconds[{RI}])))', "slow requests (p95 latency)", "B")],
-   "short", 4, w=8, h=9, desc="Output tokens per second one request sees: 1 / inter-token latency. Falls as concurrency and prefill load rise.")
+     desc="Highest 1-minute speed one request saw in the selected range: the output rate divided by the requests running. "
+          "About 166 tok/s is the ceiling with no other load; more requests at once, long contexts and prompts "
+          "being prefilled at the same time pull it down.")
+ts("Per-request output speed", [target(per_request(RI), "per running request")],
+   "short", 4, w=8, h=9,
+   desc="Output tokens per second one request sees: the output rate divided by the requests running. "
+        "Falls as concurrency, context length and prefill load rise.")
 ts("Concurrent requests", [
     target('sum(vllm:num_requests_running)', "running in vLLM"),
     target('sum(vllm:num_requests_waiting)', "waiting in vLLM", "B"),
@@ -325,10 +335,12 @@ ts("Time to first token", [
     target(f'histogram_quantile(0.5, sum(rate(vllm:time_to_first_token_seconds[{RI}])))', "p50"),
     target(f'histogram_quantile(0.95, sum(rate(vllm:time_to_first_token_seconds[{RI}])))', "p95", "B")],
    "s", 8, w=8, desc="Queueing plus prefill, measured by vLLM.")
-ts("Time per output token", [
-    target(f'histogram_quantile(0.5, sum(rate(vllm:inter_token_latency_seconds[{RI}])))', "p50"),
-    target(f'histogram_quantile(0.95, sum(rate(vllm:inter_token_latency_seconds[{RI}])))', "p95", "B")],
-   "s", 16, w=8, desc="Gap between output tokens during decode. Rises with concurrency.")
+ts("Decode time per request", [
+    target(f'histogram_quantile(0.5, sum(rate(vllm:request_decode_time_seconds[{RI}])))', "p50"),
+    target(f'histogram_quantile(0.95, sum(rate(vllm:request_decode_time_seconds[{RI}])))', "p95", "B")],
+   "s", 16, w=8,
+   desc="Time from a request's first output token to its last, measured by vLLM: end-to-end latency minus "
+        "time to first token. Long replies and reasoning dominate it; per-token speed is under Throughput.")
 advance(8)
 
 # ---------------------------------------------------------------- Throughput
