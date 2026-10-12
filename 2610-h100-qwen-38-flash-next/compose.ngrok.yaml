@@ -1,0 +1,31 @@
+# Public tunnel to the LiteLLM gateway. Use together with compose.yaml:
+#   scripts/deploy.sh up   (included by default)
+# NGROK_AUTHTOKEN and NGROK_URL come from .env (workstation .env is merged into
+# the VM's by deploy.sh). Access control: config/ngrok-traffic-policy.yaml.
+services:
+  ngrok:
+    image: ngrok/ngrok:3@sha256:14d80d083e5b53145f416bbbd36238336c9de4016c43fd950eb2eb845670583b
+    container_name: llm-ngrok
+    depends_on:
+      litellm:
+        condition: service_healthy
+    environment:
+      NGROK_AUTHTOKEN: "${NGROK_AUTHTOKEN:?set NGROK_AUTHTOKEN in .env}"
+    command:
+      - http
+      - http://litellm:4000
+      - --url=${NGROK_URL:?set NGROK_URL in .env}
+      - --log=stdout
+      - --traffic-policy-file=/etc/ngrok/traffic-policy.yaml
+    volumes:
+      - ./config/ngrok-traffic-policy.yaml:/etc/ngrok/traffic-policy.yaml:ro
+    labels:
+      observability.logs: "true"
+      observability.service: "ngrok"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels-regex: '^(observability\.|com\.docker\.compose\.service$)'
+    restart: unless-stopped

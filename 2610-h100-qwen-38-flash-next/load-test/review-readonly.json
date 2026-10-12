@@ -1,0 +1,24 @@
+{
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM gateway",
+      "options": { "baseURL": "{env:LOCAL_LLM_URL}/v1" },
+      "models": { "local-llm": { "name": "local-llm", "limit": { "context": 245760, "output": 16384 } } }
+    }
+  },
+  "model": "litellm/local-llm",
+  "small_model": "litellm/local-llm",
+  "permission": {
+    "read": { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
+    "glob": "allow", "grep": "allow", "list": "allow", "todowrite": "allow",
+    "edit": "deny", "bash": "deny", "webfetch": "deny", "websearch": "deny",
+    "external_directory": "deny", "question": "deny", "task": "deny", "doom_loop": "deny"
+  },
+  "mcp": { "playwright": { "enabled": false } },
+  "lsp": false,
+  "formatter": false,
+  "snapshot": false,
+  "autoupdate": false,
+  "share": "disabled"
+}

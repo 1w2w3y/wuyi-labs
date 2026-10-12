@@ -1,0 +1,67 @@
+# Telemetry overlay: every signal to Application Insights over OTLP, through
+# an OpenTelemetry Collector. Use together with compose.yaml:
+#   scripts/deploy.sh up   (included by default)
+# Endpoints and the identity's client ID are in .env (not secrets).
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.161.0@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
+    container_name: llm-otel-collector
+    # Root: reads the Docker socket and root-owned container log files.
+    user: "0:0"
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      TELEMETRY_UAMI_CLIENT_ID: "${TELEMETRY_UAMI_CLIENT_ID:?set TELEMETRY_UAMI_CLIENT_ID in .env}"
+      AZMON_APPLICATION_ID: "${AZMON_APPLICATION_ID:?set AZMON_APPLICATION_ID in .env}"
+      AZMON_TRACES_ENDPOINT: "${AZMON_TRACES_ENDPOINT:?set AZMON_TRACES_ENDPOINT in .env}"
+      AZMON_LOGS_ENDPOINT: "${AZMON_LOGS_ENDPOINT:?set AZMON_LOGS_ENDPOINT in .env}"
+      AZMON_METRICS_ENDPOINT: "${AZMON_METRICS_ENDPOINT:?set AZMON_METRICS_ENDPOINT in .env}"
+      DEPLOYMENT_ENVIRONMENT: "${DEPLOYMENT_ENVIRONMENT:-azure-h100}"
+      # Stamped as upstream_model on every metric, log and span (otelcol config).
+      LLM_MODEL: "${LLM_MODEL:-qwen3.8-flash-next-vllm}"
+    volumes:
+      - ./observability/otelcol/config.yaml:/etc/otelcol/config.yaml:ro
+      - /data/otelcol:/var/lib/otelcol
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data/docker/containers:/var/lib/docker/containers:ro
+      - /:/hostfs:ro
+    labels:
+      observability.service: "otel-collector"
+    healthcheck:
+      # The image is distroless (no shell or curl); the health_check extension
+      # is probed by deploy/smoke scripts from the host instead.
+      disable: true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels-regex: '^(observability\.|com\.docker\.compose\.service$)'
+    ports:
+      - "127.0.0.1:13133:13133"
+    restart: unless-stopped
+
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.2-4.8.1-ubuntu22.04@sha256:17e9d49093f2d86d90260eec3c07b18b3f78fc5eadef3c8ab26a24fa5a9c1b2c
+    container_name: llm-dcgm-exporter
+    gpus: all
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      DCGM_EXPORTER_COLLECTORS: /etc/dcgm-exporter/counters.csv
+    volumes:
+      - ./observability/dcgm/counters.csv:/etc/dcgm-exporter/counters.csv:ro
+    labels:
+      observability.service: "gpu"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels-regex: '^(observability\.|com\.docker\.compose\.service$)'
+    restart: unless-stopped
+
+  litellm:
+    environment:
+      OTEL_EXPORTER: otlp_http
+      OTEL_ENDPOINT: http://otel-collector:4318/v1/traces
+      OTEL_RESOURCE_ATTRIBUTES: "service.namespace=llm-self-hosting,deployment.environment.name=${DEPLOYMENT_ENVIRONMENT:-azure-h100}"

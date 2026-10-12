@@ -1,0 +1,25 @@
+# ngrok edge policy for compose.ngrok.yaml. The LiteLLM gateway has no auth,
+# so this allow-list is the only access control on the public URL.
+# Replace the example addresses (RFC 5737 documentation ranges) with the
+# public IPs of the clients that may call the model.
+on_http_request:
+  - expressions:
+      - "conn.client_ip != '203.0.113.10' && conn.client_ip != '198.51.100.20'"
+    actions:
+      - type: custom-response
+        config:
+          status_code: 403
+          body: Forbidden
+          headers:
+            content-type: text/plain
+  # Prometheus metrics are unauthenticated and only meant for the local
+  # collector; never serve them through the tunnel.
+  - expressions:
+      - "req.url.path.startsWith('/metrics')"
+    actions:
+      - type: custom-response
+        config:
+          status_code: 403
+          body: Forbidden
+          headers:
+            content-type: text/plain
