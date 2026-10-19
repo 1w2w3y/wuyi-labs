@@ -1,0 +1,37 @@
+# Review Microsoft Agent Framework across both of its languages in one run, so
+# the model switches between C# and Python within a session.
+name: agent-framework-review
+description: Defect review of Microsoft Agent Framework (.NET and Python)
+
+repo: agent-framework
+
+paths:
+  - "dotnet/src/**/*.cs"
+  - "python/packages/**/*.py"
+exclude:
+  - "**/obj/**"
+  - "**/bin/**"
+  - "**/tests/**"
+  - "**/test_*.py"
+  - "**/*_test.py"
+  - "**/__pycache__/**"
+
+batch_size: 6
+
+min_file_bytes: 1000
+max_file_bytes: 140000
+
+agents: 8
+
+context_limit: 245760
+output_limit: 16384
+
+subagents: false
+
+interactivity_floor_tps: 20
+
+budget:
+  wall_seconds: 1800
+  requests: 0
+
+retries_per_batch: 1

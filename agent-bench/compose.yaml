@@ -1,0 +1,37 @@
+# agent-bench: one container, N concurrent agents inside it.
+#
+#   LLM_BASE_URL=https://gateway.example.com/v1 LLM_MODEL=local-llm \
+#     docker compose run --rm agent-bench
+#
+# The corpus lives in a named volume, so the clone happens once and later runs
+# start immediately.
+services:
+  agent-bench:
+    build:
+      context: .
+      args:
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-1.19.0}
+    image: ${AGENT_BENCH_IMAGE:-ghcr.io/1w2w3y/wuyi-labs/agent-bench:latest}
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL:?set LLM_BASE_URL to the gateway URL including /v1}
+      LLM_MODEL: ${LLM_MODEL:?set LLM_MODEL to the model the gateway serves}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      SCENARIO: ${SCENARIO:-agent-framework-review}
+      AGENTS: ${AGENTS:-8}
+      BATCH_SIZE: ${BATCH_SIZE:-}
+      MAX_FILES: ${MAX_FILES:-}
+      WALL_SECONDS: ${WALL_SECONDS:-}
+      GAP_SECONDS: ${GAP_SECONDS:-3}
+      # Scrape these before and after the run for the server's own view.
+      VLLM_METRICS_URL: ${VLLM_METRICS_URL:-}
+      GATEWAY_METRICS_URL: ${GATEWAY_METRICS_URL:-}
+    volumes:
+      - corpus:/corpus
+      - ./results:/results
+    # Each opencode process holds roughly 0.7-0.9 GB; 8 agents need ~8 GB.
+    # Raise this with AGENTS, or the kernel will start killing agents.
+    shm_size: 1g
+    mem_limit: ${MEM_LIMIT:-12g}
+
+volumes:
+  corpus:

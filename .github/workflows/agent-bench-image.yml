@@ -1,0 +1,114 @@
+name: agent-bench image
+
+# Publishes ghcr.io/<owner>/wuyi-labs/agent-bench on every push to main that
+# touches the harness, so `docker run ghcr.io/...:latest` is always the tip of
+# main. Pull requests build but do not push, so a broken Dockerfile is caught
+# before it lands.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent-bench/**"
+      - ".github/workflows/agent-bench-image.yml"
+  pull_request:
+    paths:
+      - "agent-bench/**"
+      - ".github/workflows/agent-bench-image.yml"
+  # Lets you cut a release tag, or rebuild on a new opencode version, by hand.
+  workflow_dispatch:
+    inputs:
+      opencode_version:
+        description: opencode version to bake in
+        required: false
+        default: ""
+
+concurrency:
+  group: agent-bench-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/agent-bench
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Sanity checks first: a syntax error should not cost a build.
+      - name: Check the harness parses
+        run: |
+          python3 -m pip install --quiet pyyaml
+          for f in agent-bench/runner/*.py; do python3 -m py_compile "$f"; done
+          bash -n agent-bench/entrypoint.sh
+          bash -n agent-bench/corpus/fetch.sh
+          python3 - <<'PY'
+          import glob, json, yaml
+          for path in sorted(glob.glob("agent-bench/scenarios/*.yaml")):
+              s = yaml.safe_load(open(path))
+              for key in ("name", "repo", "paths", "agents", "batch_size"):
+                  assert key in s, f"{path} is missing {key}"
+          t = open("agent-bench/opencode/config.template.json").read()
+          for token, value in (("__BASE_URL__", "http://x/v1"), ("__API_KEY__", "k"),
+                               ("__MODEL__", "m"), ("__CONTEXT__", "1"),
+                               ("__OUTPUT__", "1"), ("__TASK_PERMISSION__", "deny")):
+              t = t.replace(token, value)
+          json.loads(t)
+          print("harness checks passed")
+          PY
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=raw,value={{date 'YYYYMMDD'}},enable={{is_default_branch}}
+            type=ref,event=pr
+          labels: |
+            org.opencontainers.image.title=agent-bench
+            org.opencontainers.image.description=Load a self-hosted LLM with concurrent coding agents
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: agent-bench
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The corpus is cloned at run time into a volume, so the image stays
+          # small and the build does not depend on three upstream repos.
+          build-args: |
+            BAKE_CORPUS=0
+            ${{ inputs.opencode_version && format('OPENCODE_VERSION={0}', inputs.opencode_version) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the image
+        run: |
+          image=$(printf '%s\n' "${{ steps.meta.outputs.tags }}" | head -1)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Not pushed, so rebuild into the local daemon to test it.
+            docker build -t agent-bench:pr agent-bench
+            image=agent-bench:pr
+          fi
+          docker run --rm "$image" list
+          docker run --rm "$image" --help
+          echo "image responds: $image"

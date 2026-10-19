@@ -93,6 +93,7 @@ Day to day:
 scripts/vm-power.sh stop|start|status         # deallocate / start (the stack restarts on boot)
 scripts/vm-run.sh -c 'docker logs --tail 50 qwen3.8-flash-next-vllm'
 scripts/vm-run.sh scripts/bench.sh            # vllm bench serve at concurrency 1/4/16/32 + shared prefix
+scripts/vm-run.sh scripts/bench-agentx.sh     # AgentX: replayed real coding-agent sessions
 scripts/vm-run.sh -c 'python3 /opt/llm-self-hosting/scripts/realtext.py 1 32'   # real-text decode speed
 az group delete -n <resource-group> --yes     # remove everything
 ```
@@ -150,6 +151,12 @@ repository, `.env` files or sub-agents (`task`). Before a run:
   ```
 
 - **Mind what leaves your machine:** each agent reads its repository and sends the files to the model.
+
+For a repeatable version of this with pinned corpora, client-side metering and a coverage check, see
+[`agent-bench`](../agent-bench/): the same idea in a container, so a run does not depend on which repositories
+happen to be on your workstation. [`scripts/bench-agentx.sh`](scripts/bench-agentx.sh) is the complement --
+it replays 393 real coding-agent sessions through NVIDIA AIPerf, which gives a number comparable with other
+people's, but cannot capture how *this* model behaves as an agent.
 
 Size the run by sessions, not requests: the sessions that stay in the prefix cache are about the KV cache size
 divided by a typical session's context, 1.5 million / 100,000-150,000, so 10-15 here. Each opencode process

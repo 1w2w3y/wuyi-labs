@@ -1,0 +1,41 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "bench": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "agent-bench gateway (metered)",
+      "options": {
+        "baseURL": "__BASE_URL__",
+        "apiKey": "__API_KEY__"
+      },
+      "models": {
+        "__MODEL__": {
+          "name": "__MODEL__",
+          "limit": { "context": __CONTEXT__, "output": __OUTPUT__ }
+        }
+      }
+    }
+  },
+  "model": "bench/__MODEL__",
+  "small_model": "bench/__MODEL__",
+  "permission": {
+    "read": { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "todowrite": "allow",
+    "edit": "deny",
+    "bash": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "external_directory": "deny",
+    "question": "deny",
+    "task": "__TASK_PERMISSION__",
+    "doom_loop": "deny"
+  },
+  "lsp": false,
+  "formatter": false,
+  "snapshot": false,
+  "autoupdate": false,
+  "share": "disabled"
+}

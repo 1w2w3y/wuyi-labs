@@ -1,0 +1,2 @@
+# Everything here runs in the Linux container; keep LF line endings on Windows too.
+* text=auto eol=lf

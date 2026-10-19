@@ -1,0 +1,41 @@
+# Review the TypeScript package's own TypeScript sources: the public API,
+# services and compiler-options layer.
+#
+# Note on the corpus: at the pinned commit microsoft/TypeScript has been ported
+# to Go, so there is no longer a `src/compiler` of TypeScript to review -- the
+# .ts sources now live under packages/typescript/src. If you want the old
+# million-line checker.ts shape, pin `ref` in corpus/repos.tsv to a 5.x tag
+# instead and set paths back to src/compiler/**/*.ts.
+name: typescript-review
+description: Defect review of the TypeScript package sources (TypeScript)
+
+repo: typescript
+
+paths:
+  - "packages/typescript/src/**/*.ts"
+exclude:
+  - "**/*.d.ts"
+  - "**/*.generated.ts"
+  - "**/__tests__/**"
+
+batch_size: 5
+
+min_file_bytes: 1200
+# Generous: a few of these are large generated-adjacent files, and they are
+# useful for pushing a session's context up.
+max_file_bytes: 400000
+
+agents: 8
+
+context_limit: 245760
+output_limit: 16384
+
+subagents: false
+
+interactivity_floor_tps: 20
+
+budget:
+  wall_seconds: 1800
+  requests: 0
+
+retries_per_batch: 1

@@ -1,0 +1,9 @@
+# Corpus repositories, one per line, tab-separated:
+#   name  url  ref  sparse-paths (space-separated, cone mode)
+#
+# ref is a commit SHA so a run's token counts are reproducible. Resolved
+# October 18, 2026; bump deliberately, and record the change with your results
+# -- a different corpus is a different benchmark.
+dotnet-runtime	https://github.com/dotnet/runtime.git	66368e9db028ee74da106612a72534c2d58e3a6f	src/libraries/System.Text.Json
+typescript	https://github.com/microsoft/TypeScript.git	5237fd46890956e4bb8177a1a05dcd69e4166560	packages/typescript/src
+agent-framework	https://github.com/microsoft/agent-framework.git	ebcf4db7f9462ef6c377761e0b3159c4c5a73027	dotnet/src python/packages

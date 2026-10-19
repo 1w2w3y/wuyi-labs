@@ -1,0 +1,50 @@
+# Review System.Text.Json: dense, idiomatic C# with heavy generics and spans.
+name: dotnet-review
+description: Defect review of the System.Text.Json library (.NET, C#)
+
+# A corpus name from corpus/repos.tsv, or an absolute path to a mounted repo.
+repo: dotnet-runtime
+
+# Globs relative to the repo root, in the order reviewed. Sorted for
+# determinism, so the same scenario always produces the same work queue.
+paths:
+  - "src/libraries/System.Text.Json/src/**/*.cs"
+exclude:
+  - "**/obj/**"
+  - "**/bin/**"
+  - "**/*.Designer.cs"
+  - "**/*.generated.cs"
+
+# Files per opencode session. This is the main dial on context growth: each
+# session reads its whole batch, so the prompt grows file by file. Raise it to
+# push sessions towards the 100K+ token shape real coding agents produce;
+# lower it to keep sessions short and prefill cheap.
+batch_size: 6
+
+# Skip trivia and outliers: a 50-line file barely moves the model, and a
+# generated 2 MB file blows the context on its own.
+min_file_bytes: 1200
+max_file_bytes: 140000
+
+# Concurrent agents. Each opencode process holds roughly 0.7-0.9 GB, so size
+# this against the client machine's memory as well as the server's KV cache.
+agents: 8
+
+# Reported to opencode so it compacts before the server rejects the request.
+context_limit: 245760
+output_limit: 16384
+
+# Subagent fan-out. Real coding agents spawn them; it multiplies concurrent
+# requests per session, so turn it on deliberately.
+subagents: false
+
+# Per-stream output rate below which the run is "too slow to code against".
+interactivity_floor_tps: 20
+
+budget:
+  wall_seconds: 1800
+  requests: 0 # 0 means unlimited
+
+# Re-drive a batch whose files the agent never read. Set 0 to measure how much
+# work a model abandons when left alone.
+retries_per_batch: 1
