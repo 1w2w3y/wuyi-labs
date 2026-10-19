@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import proxy as proxy_mod  # noqa: E402
 import report as report_mod  # noqa: E402
 import preflight as preflight_mod  # noqa: E402
+import telemetry as telemetry_mod  # noqa: E402
 
 try:
     import yaml
@@ -152,7 +153,7 @@ def batches(items, size):
 class Agent(threading.Thread):
     def __init__(self, idx, slice_files, scenario, cfg_path, repo, out_dir,
                  goal_template, deadline, stop_event, opencode_bin, recorder,
-                 state_root):
+                 state_root, telemetry=None, run_span=None, run_id=""):
         super().__init__(daemon=True)
         self.idx = idx
         self.label = "agent-{:02d}".format(idx)
@@ -166,6 +167,9 @@ class Agent(threading.Thread):
         self.opencode_bin = opencode_bin
         self.recorder = recorder
         self.state_root = state_root
+        self.telemetry = telemetry
+        self.run_span = run_span
+        self.run_id = run_id
         self.batches = batches([f for f, _ in slice_files],
                                scenario.get("batch_size", 6))
         self.assigned = [f for f, _ in slice_files]
@@ -247,6 +251,24 @@ class Agent(threading.Thread):
         started = time.time()
         reads_before = self.recorder.reads_for(self.label)
         timeout = max(60, int(self.deadline - time.time()))
+
+        session_span = None
+        if self.telemetry is not None and self.telemetry.enabled:
+            # Its own trace, linked to the run: see Telemetry.span.
+            session_span = self.telemetry.span(
+                "session {} batch {}".format(self.label, batch_no),
+                parent=self.run_span,
+                new_trace=True,
+                **{
+                    "agent_bench.run_id": self.run_id,
+                    "agent_bench.scenario": self.scenario.get("name"),
+                    "agent_bench.agent": self.label,
+                    "agent_bench.batch": batch_no,
+                    "agent_bench.attempt": attempt + 1,
+                    "agent_bench.files_assigned": len(files),
+                }
+            )
+            telemetry_mod.set_session(self.label, session_span)
         try:
             done = subprocess.run(
                 cmd, cwd=str(self.repo), env=env, capture_output=True,
@@ -268,6 +290,34 @@ class Agent(threading.Thread):
         if missed:
             log.write("\n[unread: {}]\n".format(", ".join(missed)))
             log.flush()
+
+        if session_span is not None:
+            # Stop parenting request spans onto this session before ending it.
+            telemetry_mod.set_session(self.label, None)
+            reviewed = len(files) - len(missed)
+            session_span.end(
+                error="timeout" if timed_out else None,
+                **{
+                    "agent_bench.files_unread": len(missed),
+                    "agent_bench.files_reviewed": reviewed,
+                    "agent_bench.exit_code": status,
+                }
+            )
+            tel = self.telemetry
+            tel.count("agent_bench.sessions", 1, agent=self.label,
+                      outcome="timeout" if timed_out else
+                              ("incomplete" if missed else "complete"))
+            tel.count("agent_bench.files_reviewed", reviewed, agent=self.label)
+            if missed:
+                tel.count("agent_bench.files_unread", len(missed),
+                          agent=self.label)
+            tel.log(
+                "{} batch {} attempt {}: reviewed {} of {} files in {:.0f}s".format(
+                    self.label, batch_no, attempt + 1, reviewed, len(files),
+                    time.time() - started),
+                span=session_span, agent=self.label, batch=batch_no,
+                files_unread=len(missed),
+            )
 
         return {
             "batch": batch_no,
@@ -313,15 +363,19 @@ def resolve_opencode():
     return shutil.which("opencode") or "opencode"
 
 
-def smoke_opencode(opencode_bin, cfg_text, model, timeout=180):
+def smoke_opencode(opencode_bin, cfg_text, model, timeout=180, attempts=2):
     """One real opencode turn, on a throwaway file, before the run starts.
 
-    The wire checks in preflight.py cannot catch everything. `gpt-oss-120b`
-    behind a LiteLLM gateway passes all of them -- it streams content, it
-    streams well-formed tool calls -- and still hangs opencode indefinitely
-    with no output, while `gpt-4.1-mini` on the same gateway finishes the same
-    task in seconds. Only driving the real agent finds that class of failure,
-    and finding it here costs three minutes instead of a whole run.
+    The wire checks in preflight.py cannot catch everything: a model can
+    stream well-formed content and well-formed tool calls and still leave
+    opencode producing nothing at all, in which case a run reports plausible
+    throughput for no work. Driving the real agent is the only way to see it,
+    and seeing it here costs a few minutes instead of a whole run.
+
+    Retried, because this check fails open-endedly: a cold provider install
+    or a slow minute on the gateway looks exactly like an incompatible model,
+    and aborting a half-hour benchmark over one slow attempt is worse than
+    waiting twice.
     """
     with tempfile.TemporaryDirectory(prefix="agent-bench-smoke-") as tmp:
         sample = Path(tmp) / "sample.py"
@@ -343,28 +397,32 @@ def smoke_opencode(opencode_bin, cfg_text, model, timeout=180):
             env[var] = str(d)
         cmd = [opencode_bin, "run", "--pure", "-m", "bench/" + model,
                "Read sample.py and list its bugs with line numbers."]
-        started = time.monotonic()
-        try:
-            done = subprocess.run(cmd, cwd=tmp, env=env, capture_output=True,
-                                  text=True, errors="replace", timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return False, (
-                "opencode produced nothing in {}s against this model.\n"
-                "  The gateway answers correctly at the wire level, so this is "
-                "an agent/model incompatibility, not a serving fault. Try "
-                "another model: a run against this one would generate little "
-                "or no load while appearing to succeed.".format(timeout)
-            )
-        took = time.monotonic() - started
-        text = (done.stdout or "").strip()
-        if not text:
-            return False, (
-                "opencode exited {} after {:.0f}s with no output. The agent is "
-                "not getting usable replies from this model.".format(
-                    done.returncode, took)
-            )
-        return True, "reviewed a sample file in {:.0f}s, {} chars out".format(
-            took, len(text))
+        last = ""
+        for attempt in range(1, attempts + 1):
+            started = time.monotonic()
+            try:
+                done = subprocess.run(cmd, cwd=tmp, env=env, capture_output=True,
+                                      text=True, errors="replace", timeout=timeout)
+            except subprocess.TimeoutExpired:
+                last = "produced nothing in {}s".format(timeout)
+                continue
+            took = time.monotonic() - started
+            text = (done.stdout or "").strip()
+            if text:
+                note = "" if attempt == 1 else " (on attempt {})".format(attempt)
+                return True, "reviewed a sample file in {:.0f}s, {} chars out{}".format(
+                    took, len(text), note)
+            last = "exited {} after {:.0f}s with no output".format(
+                done.returncode, took)
+
+        return False, (
+            "opencode {} on {} attempts against this model.\n"
+            "  The gateway answers at the wire level, so the agent is not "
+            "getting replies it can act on, and a run against this model "
+            "would generate little or no load while appearing to succeed. "
+            "Try another model, or raise SMOKE_SECONDS if the gateway is "
+            "merely slow right now.".format(last, attempts)
+        )
 
 
 def scrape(url, timeout=20):
@@ -497,6 +555,26 @@ def main(argv=None):
     goal_template = _strip_frontmatter(
         (ROOT / "opencode" / "command" / "goal.md").read_text(encoding="utf-8"))
 
+    run_id = "{}-{}".format(scenario["name"], stamp)
+    telemetry = telemetry_mod.from_env(run_id, scenario["name"], args.model)
+    if telemetry.enabled:
+        print("telemetry: OTLP to {} every {:.0f}s".format(
+            telemetry.endpoint, telemetry.flush_seconds))
+        telemetry.start()
+    run_span = telemetry.span(
+        "agent-bench run {}".format(scenario["name"]),
+        **{
+            "agent_bench.run_id": run_id,
+            "agent_bench.scenario": scenario["name"],
+            "agent_bench.agents": n_agents,
+            "agent_bench.queue_files": len(files),
+            "agent_bench.batch_size": scenario.get("batch_size"),
+            "agent_bench.repo_sha": sha,
+            "gen_ai.request.model": args.model,
+            "server.address": args.base_url,
+        }
+    )
+
     recorder = proxy_mod.Recorder(str(out_dir / "requests.jsonl"))
     servers = []
     cfg_paths = []
@@ -504,7 +582,8 @@ def main(argv=None):
         port = args.proxy_port_base + i
         servers.append(proxy_mod.serve(
             port, args.base_url.rstrip("/").removesuffix("/v1"),
-            args.api_key, recorder, "agent-{:02d}".format(i)))
+            args.api_key, recorder, "agent-{:02d}".format(i),
+            telemetry if telemetry.enabled else None))
         cfg = render_config("http://127.0.0.1:{}/v1".format(port))
         p = out_dir / "config" / "agent-{:02d}.json".format(i)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -532,8 +611,25 @@ def main(argv=None):
     agents = []
     for i, sl in enumerate(slices):
         a = Agent(i, sl, scenario, cfg_paths[i], repo, out_dir, goal_template,
-                  deadline, stop_event, opencode_bin, recorder, state_root)
+                  deadline, stop_event, opencode_bin, recorder, state_root,
+                  telemetry, run_span, run_id)
         agents.append(a)
+
+    # Sample live gauges while the run is in flight, so the dashboards show it
+    # happening rather than only a verdict at the end.
+    sampler_stop = threading.Event()
+
+    def sample_gauges():
+        while not sampler_stop.wait(5.0):
+            telemetry.gauge("agent_bench.requests.in_flight", proxy_mod.inflight())
+            telemetry.gauge("agent_bench.agents.running",
+                            sum(1 for a in agents if a.is_alive()))
+
+    sampler = None
+    if telemetry.enabled:
+        sampler = threading.Thread(target=sample_gauges, daemon=True,
+                                   name="agent-bench-gauges")
+        sampler.start()
 
     print("running: {} agents, {}s budget, results in {}".format(
         n_agents, wall, out_dir))
@@ -554,6 +650,9 @@ def main(argv=None):
             a.join(timeout=30)
 
     elapsed = time.time() - t0
+    sampler_stop.set()
+    if sampler:
+        sampler.join(timeout=10)
     for s in servers:
         s.shutdown()
     recorder.close()
@@ -600,7 +699,78 @@ def main(argv=None):
     (out_dir / "summary.txt").write_text(text, encoding="utf-8")
     print("\n" + text)
     print("results: {}".format(out_dir))
+
+    _export_summary(telemetry, run_span, summary, run_id)
+    telemetry.shutdown()
+    if telemetry.enabled:
+        print("telemetry: exported {spans} spans, {metrics} metrics, {logs} logs"
+              "{failed}".format(failed=", {} export failures".format(telemetry.failures)
+                                if telemetry.failures else "",
+                                **telemetry.exported))
     return 0
+
+
+def _export_summary(telemetry, run_span, summary, run_id):
+    """The run's verdict as gauges plus one log record.
+
+    The per-request counters already describe the traffic. These are the
+    derived figures a dashboard wants to show per run, and which cannot be
+    recomputed from counters alone -- coverage, the per-stream rate at the
+    slow end, cost per reviewed file.
+    """
+    if not telemetry.enabled:
+        return
+    load = summary.get("load") or {}
+    prod = summary.get("productivity") or {}
+    gauges = {
+        "agent_bench.run.output_tokens_per_second": load.get("output_tokens_per_second"),
+        "agent_bench.run.prompt_tokens_per_second": load.get("prompt_tokens_per_second"),
+        "agent_bench.run.cached_prompt_fraction": load.get("cached_prompt_fraction"),
+        "agent_bench.run.mean_concurrent_requests": load.get("mean_concurrent_requests"),
+        "agent_bench.run.ttft_p50_seconds": load.get("ttft_p50_s"),
+        "agent_bench.run.ttft_p95_seconds": load.get("ttft_p95_s"),
+        "agent_bench.run.per_stream_tps_p50": load.get("per_stream_tps_p50"),
+        "agent_bench.run.per_stream_tps_slow_decile": load.get("per_stream_tps_p90_slow"),
+        "agent_bench.run.prompt_tokens_p50": load.get("prompt_tokens_p50"),
+        "agent_bench.run.coverage": prod.get("coverage"),
+        "agent_bench.run.files_reviewed": prod.get("files_reviewed"),
+        "agent_bench.run.files_abandoned": prod.get("files_abandoned"),
+        "agent_bench.run.output_tokens_per_reviewed_file":
+            prod.get("output_tokens_per_reviewed_file"),
+        "agent_bench.run.prompt_tokens_per_reviewed_file":
+            prod.get("prompt_tokens_per_reviewed_file"),
+        "agent_bench.run.elapsed_seconds": summary.get("elapsed_seconds"),
+    }
+    for name, value in gauges.items():
+        if value is not None:
+            telemetry.gauge(name, float(value))
+
+    meets = load.get("meets_interactivity_floor")
+    telemetry.log(
+        "run {} finished: {} tok/s output, {} of {} files reviewed "
+        "({}), {} agents".format(
+            run_id, load.get("output_tokens_per_second"),
+            prod.get("files_reviewed"), prod.get("queue_files"),
+            "meets the interactivity floor" if meets
+            else "below the interactivity floor" if meets is False
+            else "no floor set",
+            summary.get("agents")),
+        span=run_span,
+        **{
+            "agent_bench.run_id": run_id,
+            "agent_bench.coverage": prod.get("coverage"),
+            "agent_bench.meets_interactivity_floor": meets,
+            "agent_bench.requests_failed": load.get("requests_failed"),
+        }
+    )
+    run_span.end(**{
+        "agent_bench.output_tokens_per_second": load.get("output_tokens_per_second"),
+        "agent_bench.coverage": prod.get("coverage"),
+        "agent_bench.files_reviewed": prod.get("files_reviewed"),
+        "agent_bench.requests_ok": load.get("requests_ok"),
+        "agent_bench.requests_failed": load.get("requests_failed"),
+        "agent_bench.meets_interactivity_floor": meets,
+    })
 
 
 def _strip_frontmatter(text):

@@ -132,13 +132,19 @@ any load:
 5. streaming and tools together behave — the real agent shape
 6. **one actual opencode run** on a throwaway file
 
-Check 6 earns its keep. `gpt-oss-120b` behind a LiteLLM gateway passes every
-wire check — it streams content, it streams well-formed tool calls — and still
-hangs opencode indefinitely with no output, while `gpt-4.1-mini` on the same
-gateway finishes the same task in seconds. Only driving the real agent finds
-that, and finding it here costs three minutes instead of a whole run. It also
-warms opencode's provider package, so the first real session is not slower than
-the rest.
+Check 6 earns its keep: a model can pass every wire check — streaming
+content, well-formed streamed tool calls — and still leave opencode producing
+nothing at all, in which case the run reports plausible throughput for no work
+done. We saw `gpt-oss-120b` behind a LiteLLM gateway do exactly that, twice,
+where `gpt-4.1-mini` on the same gateway finished the same task in about ten
+seconds. Only driving the real agent finds it.
+
+The check is deliberately retried. We have also seen `gpt-4.1-mini` itself
+time out once on a slow minute, and aborting a half-hour benchmark over one
+slow attempt is worse than waiting twice — so a model is only declared
+unusable after every attempt fails. Raise `SMOKE_SECONDS` if your gateway is
+habitually slow to first token. The check also warms opencode's provider
+package, so the first real session is not slower than the rest.
 
 Override with `SKIP_PREFLIGHT=1` when you are deliberately measuring a broken
 route.
@@ -239,6 +245,134 @@ done
 
 Read it with the productivity block. High tok/s with low coverage means the
 model is busy talking to itself, and that throughput buys nothing.
+
+## Telemetry
+
+Set one environment variable and the run exports OTLP over HTTP: spans, metrics
+and logs, no sidecar and no extra dependency in the image.
+
+```bash
+docker run --rm   -e LLM_BASE_URL=... -e LLM_MODEL=...   -e OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com   -v agent-bench-corpus:/corpus -v "$PWD/results:/results"   ghcr.io/1w2w3y/wuyi-labs/agent-bench:latest
+```
+
+### One trace from agent to model
+
+The interesting part is not that agent-bench has its own spans. It is that the
+metering proxy puts a W3C `traceparent` on every upstream call, and
+[LiteLLM extracts an inbound traceparent](https://docs.litellm.ai/docs/observability/opentelemetry_v2)
+and parents its own GenAI spans onto it. So one trace covers the whole path:
+
+```text
+agent-bench run <scenario>                 (the run: queue size, agents, corpus SHA)
+  session agent-03 batch 7                 (one opencode session, files assigned/read)
+    chat <model>                           (one LLM request, as the agent saw it)
+      Received Proxy Server Request        (LiteLLM, in your App Insights)
+        litellm_request -> vLLM            (the gateway's own view)
+```
+
+That is the join you cannot get from server-side telemetry alone: a slow p95
+TTFT becomes *which agent, on which batch, reading which file* stalled. If you
+would rather keep the traces separate, set
+`OTEL_IGNORE_CONTEXT_PROPAGATION=true` on the gateway.
+
+### Where to send it
+
+| You want | Set |
+|---|---|
+| Your own OTLP endpoint | `OTEL_EXPORTER_OTLP_ENDPOINT=https://otel.example.com` |
+| The stack's collector, on the VM | `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318` (join its compose network) |
+| Azure Monitor / App Insights directly | the three `OTEL_EXPORTER_OTLP_*_ENDPOINT` URLs below |
+
+An App Insights **resource ID is not an ingestion endpoint** — there is nothing
+to POST to. Reaching it directly means its data collection endpoint, which puts
+traces and logs on the logs-ingest host and metrics on a different
+metrics-ingest host, each with a DCR id in the path. So give per-signal URLs,
+the same ones the flash-next stack already has in its `.env`:
+
+```bash
+-e OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="https://<dce>.<region>-1.ingest.monitor.azure.com/dataCollectionRules/<dcr-id>/streams/Microsoft-OTLP-Traces/otlp/v1/traces"
+-e OTEL_EXPORTER_OTLP_LOGS_ENDPOINT="https://<dce>.<region>-1.ingest.monitor.azure.com/dataCollectionRules/<dcr-id>/streams/Microsoft-OTLP-Logs/otlp/v1/logs"
+-e OTEL_EXPORTER_OTLP_METRICS_ENDPOINT="https://<dce>.<region>-1.metrics.ingest.monitor.azure.com/dataCollectionRules/<dcr-id>/streams/Microsoft-OtelMetrics/otlp/v1/metrics"
+-e AZMON_APPLICATION_ID=<app-insights-application-id>
+```
+
+Those endpoints need an Entra token for `https://monitor.azure.com/.default`.
+On an Azure VM, agent-bench fetches one from IMDS automatically — set
+`TELEMETRY_UAMI_CLIENT_ID` to the user-assigned identity that holds *Monitoring
+Metrics Publisher* on the DCR, exactly as the collector does. Anywhere else,
+pass a token yourself:
+
+```bash
+-e OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer $(az account get-access-token      --resource https://monitor.azure.com --query accessToken -o tsv)"
+```
+
+`AZMON_APPLICATION_ID` matters only on this direct path: the collector's
+resource processor normally adds `microsoft.applicationId` for you, and without
+it App Insights will not attribute the data.
+
+**Going through the collector is easier and better** — it already adds
+`microsoft.applicationId`, `upstream_model`, Azure resource detection, retries
+and an on-disk queue. Post straight to the DCE only when agent-bench runs
+somewhere the collector cannot be reached.
+
+### What you get
+
+Every metric carries `run_id`, `scenario`, `upstream_model` and `agent` as
+**data point** attributes, not resource attributes. That is deliberate: the
+metrics DCR keeps only `service.*`, `host.name` and `cloud.region` from the
+resource and drops everything else, so dimensions set there would vanish and
+separate runs would collapse into one series. `upstream_model` is the same
+label the rest of the stack splits by, so these line up with vLLM's and the
+gateway's series and the **Model** variable on the h100-llm dashboard filters
+them too.
+
+| Metric | Type | Dimensions beyond the defaults |
+|---|---|---|
+| `agent_bench.requests` | counter | `status`, `outcome` |
+| `agent_bench.tokens` | counter | `kind` = input / output / cached / reasoning |
+| `agent_bench.tool_calls` | counter | `tool` |
+| `agent_bench.sessions` | counter | `outcome` = complete / incomplete / timeout |
+| `agent_bench.files_reviewed`, `...files_unread` | counter | |
+| `agent_bench.requests.in_flight`, `...agents.running` | gauge | sampled every 5s |
+| `agent_bench.ttft`, `...request.duration` | histogram | seconds |
+| `agent_bench.prompt.tokens`, `...per_stream_tps` | histogram | |
+| `agent_bench.run.*` | gauge | the summary: coverage, tok/s, percentiles, cost per file |
+
+Useful PromQL once it is flowing:
+
+```promql
+# output tok/s this run drew from the server
+sum(rate(agent_bench_tokens{kind="output"}[5m])) by (run_id)
+
+# are the agents actually working, or just talking?
+sum(rate(agent_bench_files_reviewed[5m])) by (run_id)
+
+# the interactivity question, at the slow end
+histogram_quantile(0.1, sum(rate(agent_bench_per_stream_tps_bucket[5m])) by (le, run_id))
+```
+
+Logs: one record per finished session (`agent-03 batch 7: reviewed 5 of 6
+files in 94s`) and one run summary, both carrying trace and span ids so App
+Insights links them to their spans. No prompt or file content is ever sent —
+the same stance as the gateway's `turn_off_message_logging: true`.
+
+### If it goes quiet
+
+Telemetry never fails a run. Export errors are counted and the first one is
+printed; the run's last line reports the totals:
+
+```text
+telemetry: exported 412 spans, 37 metrics, 19 logs
+```
+
+A wrong endpoint shows up as `export to <url> rejected: HTTP 400 ...` once,
+then silence. Check it on its own with:
+
+```bash
+curl -i -X POST "$OTEL_EXPORTER_OTLP_ENDPOINT/v1/traces"   -H 'Content-Type: application/json' -d '{"resourceSpans":[]}'
+```
+
+A healthy OTLP endpoint answers `200` with `{"partialSuccess":{}}`.
 
 ## Caveats
 

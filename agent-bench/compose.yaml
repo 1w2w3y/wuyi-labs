@@ -25,6 +25,20 @@ services:
       # Scrape these before and after the run for the server's own view.
       VLLM_METRICS_URL: ${VLLM_METRICS_URL:-}
       GATEWAY_METRICS_URL: ${GATEWAY_METRICS_URL:-}
+      # Telemetry. Set a base endpoint, or per-signal URLs for Azure Monitor
+      # (traces and metrics live on different hosts there).
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: ${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_HEADERS: ${OTEL_EXPORTER_OTLP_HEADERS:-}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-agent-bench}
+      OTEL_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES:-}
+      OTEL_FLUSH_SECONDS: ${OTEL_FLUSH_SECONDS:-15}
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:-}
+      # Only needed when posting straight to an Azure Monitor DCE.
+      AZMON_APPLICATION_ID: ${AZMON_APPLICATION_ID:-}
+      TELEMETRY_UAMI_CLIENT_ID: ${TELEMETRY_UAMI_CLIENT_ID:-}
     volumes:
       - corpus:/corpus
       - ./results:/results

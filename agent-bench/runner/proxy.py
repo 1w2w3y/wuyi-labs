@@ -25,7 +25,24 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import telemetry as telemetry_mod
+
 CHAT_PATHS = ("/v1/chat/completions", "/chat/completions")
+
+_inflight = 0
+_inflight_lock = threading.Lock()
+
+
+def inflight():
+    """Requests currently open upstream, across every agent."""
+    with _inflight_lock:
+        return _inflight
+
+
+def _inflight_add(delta):
+    global _inflight
+    with _inflight_lock:
+        _inflight += delta
 READ_TOOLS = ("read", "Read", "view", "cat")
 
 
@@ -92,6 +109,7 @@ class Handler(BaseHTTPRequestHandler):
     api_key = ""
     recorder = None
     agent = ""
+    telemetry = None
 
     def log_message(self, fmt, *args):
         pass  # quiet: the runner owns stdout
@@ -105,11 +123,16 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- plumbing ---------------------------------------------------------
 
-    def _upstream_request(self, body):
+    def _upstream_request(self, body, span=None):
         url = self.upstream.rstrip("/") + self.path
         headers = {"Content-Type": self.headers.get("Content-Type", "application/json")}
         if self.api_key:
             headers["Authorization"] = "Bearer " + self.api_key
+        # LiteLLM extracts an inbound traceparent and parents its own GenAI
+        # spans onto it, so the gateway's and the model's work land in this
+        # request's trace instead of a separate root.
+        if span is not None and getattr(span, "traceparent", ""):
+            headers["traceparent"] = span.traceparent
         return urllib.request.Request(
             url, data=body or None, headers=headers, method=self.command
         )
@@ -130,20 +153,44 @@ class Handler(BaseHTTPRequestHandler):
             payload["stream_options"] = opts
             body = json.dumps(payload).encode()
 
+        model = (payload or {}).get("model")
         row = {
             "agent": self.agent,
             "t_start": time.time(),
             "path": self.path,
-            "model": (payload or {}).get("model"),
+            "model": model,
             "stream": streaming,
             "n_messages": len(((payload or {}).get("messages")) or []),
             "n_tools_offered": len(((payload or {}).get("tools")) or []),
         }
         started = time.monotonic()
 
+        span = None
+        if is_chat and self.telemetry is not None:
+            span = self.telemetry.span(
+                "chat {}".format(model or "unknown"),
+                parent=telemetry_mod.get_session(self.agent),
+                kind=telemetry_mod.SPAN_KIND_CLIENT,
+                **{
+                    "gen_ai.operation.name": "chat",
+                    "gen_ai.request.model": model,
+                    "gen_ai.request.max_tokens": (payload or {}).get("max_tokens"),
+                    "gen_ai.request.temperature": (payload or {}).get("temperature"),
+                    "agent_bench.agent": self.agent,
+                    "agent_bench.messages": row["n_messages"],
+                    "agent_bench.tools_offered": row["n_tools_offered"],
+                    "server.address": self.upstream,
+                }
+            )
+            row["trace_id"] = span.trace_id
+            row["span_id"] = span.span_id
+
+        _inflight_add(1)
         try:
-            resp = urllib.request.urlopen(self._upstream_request(body), timeout=1800)
+            resp = urllib.request.urlopen(
+                self._upstream_request(body, span), timeout=1800)
         except urllib.error.HTTPError as exc:
+            _inflight_add(-1)
             detail = exc.read()
             row.update(
                 status=exc.code,
@@ -151,24 +198,81 @@ class Handler(BaseHTTPRequestHandler):
                 duration_s=round(time.monotonic() - started, 3),
             )
             self._record(row)
+            self._finish_span(span, row, error="HTTP {}".format(exc.code))
             self._send_raw(exc.code, detail,
                            exc.headers.get("Content-Type", "application/json"))
             return
         except Exception as exc:  # reset, DNS, timeout
+            _inflight_add(-1)
             row.update(
                 status=0,
                 error="{}: {}".format(type(exc).__name__, exc),
                 duration_s=round(time.monotonic() - started, 3),
             )
             self._record(row)
+            self._finish_span(span, row, error=type(exc).__name__)
             self._send_raw(502, json.dumps({"error": str(exc)}).encode(),
                            "application/json")
             return
 
-        if streaming:
-            self._pump_sse(resp, row, started)
-        else:
-            self._pump_whole(resp, row, started)
+        try:
+            if streaming:
+                self._pump_sse(resp, row, started, span)
+            else:
+                self._pump_whole(resp, row, started, span)
+        finally:
+            _inflight_add(-1)
+
+    def _finish_span(self, span, row, error=None):
+        """End the request span and feed the run's metrics from the same row."""
+        tel = self.telemetry
+        if span is None or tel is None:
+            return
+        span.end(
+            error=error,
+            **{
+                "gen_ai.response.model": row.get("model"),
+                "gen_ai.usage.input_tokens": row.get("prompt_tokens"),
+                "gen_ai.usage.output_tokens": row.get("completion_tokens"),
+                "gen_ai.response.finish_reasons": [row["finish_reason"]]
+                    if row.get("finish_reason") else None,
+                "agent_bench.cached_prompt_tokens": row.get("cached_prompt_tokens"),
+                "agent_bench.reasoning_tokens": row.get("reasoning_tokens"),
+                "agent_bench.ttft_seconds": row.get("ttft_s"),
+                "agent_bench.tool_calls": row.get("tool_calls") or None,
+                "agent_bench.files_read": len(row.get("read_paths") or []) or None,
+                "http.response.status_code": row.get("status"),
+            }
+        )
+
+        agent = self.agent
+        tel.count("agent_bench.requests", 1, agent=agent,
+                  status=str(row.get("status")),
+                  outcome="error" if error else "ok")
+        if error:
+            return
+        for kind, key in (("input", "prompt_tokens"),
+                          ("output", "completion_tokens"),
+                          ("cached", "cached_prompt_tokens"),
+                          ("reasoning", "reasoning_tokens")):
+            value = row.get(key)
+            if value:
+                tel.count("agent_bench.tokens", value, agent=agent, kind=kind)
+        for name in row.get("tool_calls") or []:
+            tel.count("agent_bench.tool_calls", 1, agent=agent, tool=str(name))
+        tel.observe("agent_bench.ttft", row.get("ttft_s"),
+                    bounds=telemetry_mod.TTFT_BOUNDS, agent=agent)
+        tel.observe("agent_bench.request.duration", row.get("duration_s"),
+                    bounds=telemetry_mod.DURATION_BOUNDS, agent=agent)
+        tel.observe("agent_bench.prompt.tokens", row.get("prompt_tokens"),
+                    bounds=telemetry_mod.PROMPT_TOKEN_BOUNDS, agent=agent)
+        completion, duration, ttft = (row.get("completion_tokens"),
+                                      row.get("duration_s"), row.get("ttft_s"))
+        if completion and duration:
+            decode = duration - (ttft or 0)
+            if decode > 0.05:
+                tel.observe("agent_bench.per_stream_tps", completion / decode,
+                            bounds=telemetry_mod.TPS_BOUNDS, agent=agent)
 
     def _record(self, row):
         if self.recorder is not None:
@@ -184,7 +288,7 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def _pump_whole(self, resp, row, started):
+    def _pump_whole(self, resp, row, started, span=None):
         body = resp.read()
         row["status"] = resp.status
         row["duration_s"] = round(time.monotonic() - started, 3)
@@ -208,10 +312,11 @@ class Handler(BaseHTTPRequestHandler):
             row["finish_reason"] = choice.get("finish_reason")
             row["content_chars"] = len(message.get("content") or "")
         self._record(row)
+        self._finish_span(span, row)
         self._send_raw(resp.status, body,
                        resp.headers.get("Content-Type", "application/json"))
 
-    def _pump_sse(self, resp, row, started):
+    def _pump_sse(self, resp, row, started, span=None):
         self.send_response(resp.status)
         self.send_header("Content-Type",
                          resp.headers.get("Content-Type", "text/event-stream"))
@@ -299,6 +404,7 @@ class Handler(BaseHTTPRequestHandler):
         )
         self._record_usage(row, usage)
         self._record(row)
+        self._finish_span(span, row)
 
     @staticmethod
     def _record_usage(row, usage):
@@ -313,13 +419,14 @@ class Handler(BaseHTTPRequestHandler):
         row["cached_prompt_tokens"] = cached
 
 
-def serve(port, upstream, api_key, recorder, agent):
+def serve(port, upstream, api_key, recorder, agent, telemetry=None):
     """Start a proxy for one agent. Returns the server; the caller shuts it down."""
     bound = type("BoundHandler", (Handler,), {
         "upstream": upstream,
         "api_key": api_key,
         "recorder": recorder,
         "agent": agent,
+        "telemetry": telemetry,
     })
     httpd = ThreadingHTTPServer(("127.0.0.1", port), bound)
     httpd.daemon_threads = True
