@@ -52,8 +52,8 @@ Windows (host)                                     Docker Desktop (WSL 2, linux/
 
 ## Run it
 
-**1. Give the GPU 32 GB.** In the NVIDIA app, set the split of unified memory to 32 GB for the GPU, and
-restart. Then cap the WSL virtual machine, so it doesn't compete with the model for the same memory:
+**1. Give the GPU 32 GB.** In the NVIDIA app, set **Dedicated GPU Memory (GB)** under **System** >
+**Advanced** to 32, and restart. Then cap the WSL virtual machine, so it doesn't compete with the model for the same memory:
 copy `config/wslconfig.example` to `%UserProfile%\.wslconfig`, or merge it into the one you have, and run:
 
 ```powershell
