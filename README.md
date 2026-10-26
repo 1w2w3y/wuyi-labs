@@ -5,4 +5,5 @@ My personal tech playground for experiments, code samples, demos, and resources 
 
 - [2610-h100-qwen-38-27b](2610-h100-qwen-38-27b/): serve Qwen3.8-27B from one H100 Azure Spot VM with vLLM, LiteLLM and an OpenTelemetry-based Grafana dashboard that tracks token economics.
 - [2610-h100-qwen-38-flash-next](2610-h100-qwen-38-flash-next/): serve Qwen3.8-Flash-Next across the two H100s of one Azure Spot VM with vLLM, observe it on a multi-model Grafana dashboard, and load it with read-only coding agents.
+- [2610-rtx-qwen-38-27b](2610-rtx-qwen-38-27b/): serve Qwen3.8-27B on an RTX Spark laptop with vLLM and LiteLLM, and watch it with the OpenTelemetry Collector in Azure Monitor, Application Insights and Azure Managed Grafana: GPU and unified-memory metrics from Windows, LiteLLM traces, a dashboard and Prometheus alert rules.
 - [agent-bench](agent-bench/): a container that loads a self-hosted LLM with concurrent read-only coding agents over pinned .NET, TypeScript and Microsoft Agent Framework code, and reports both the throughput it drew and how much review work the agents actually finished.

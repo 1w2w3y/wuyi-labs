@@ -1,0 +1,53 @@
+# Telemetry overlay: an OpenTelemetry Collector (contrib) as a linux/arm64
+# container next to the model. It scrapes vLLM, LiteLLM and the windows_exporter
+# on the host, receives LiteLLM's spans, and sends both to Application Insights
+# and its Azure Monitor workspace over OTLP. Use together with compose.yaml:
+#
+#   docker compose -f compose.yaml -f compose.observability.yaml up -d
+#
+# The Application Insights endpoints and the Entra ID application are set in .env.
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.161.0@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
+    platform: linux/arm64
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      # Stamped as machinename on every data point and span. Docker Compose
+      # reads COMPUTERNAME from the Windows shell that runs it.
+      MACHINE_NAME: "${MACHINE_NAME:-${COMPUTERNAME:-laptop}}"
+      AZMON_APPLICATION_ID: "${AZMON_APPLICATION_ID:?set AZMON_APPLICATION_ID in .env}"
+      AZMON_TRACES_ENDPOINT: "${AZMON_TRACES_ENDPOINT:?set AZMON_TRACES_ENDPOINT in .env}"
+      AZMON_METRICS_ENDPOINT: "${AZMON_METRICS_ENDPOINT:?set AZMON_METRICS_ENDPOINT in .env}"
+      AZURE_TENANT_ID: "${AZURE_TENANT_ID:?set AZURE_TENANT_ID in .env}"
+      AZURE_CLIENT_ID: "${AZURE_CLIENT_ID:?set AZURE_CLIENT_ID in .env}"
+      AZURE_CLIENT_SECRET: "${AZURE_CLIENT_SECRET:?set AZURE_CLIENT_SECRET in .env}"
+    volumes:
+      - ./observability/otelcol/config.yaml:/etc/otelcol/config.yaml:ro
+      # The sending queue, so data survives a restart while Azure is unreachable.
+      - otelcol-data:/var/lib/otelcol
+    ports:
+      # The health_check extension: http://127.0.0.1:13133/
+      - "127.0.0.1:13133:13133"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  litellm:
+    environment:
+      OTEL_EXPORTER: otlp_http
+      OTEL_ENDPOINT: http://otel-collector:4318/v1/traces
+      OTEL_SERVICE_NAME: litellm-gateway
+      OTEL_RESOURCE_ATTRIBUTES: "service.namespace=local-llm"
+      # Token counts, timings and finish reasons, but no prompts or responses.
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "${LITELLM_OTEL_CAPTURE_MESSAGE_CONTENT:-NO_CONTENT}"
+      LITELLM_OTEL_V2: "true"
+    volumes:
+      # The same gateway config plus the otel callback.
+      - ./litellm/config.otel.yaml:/app/config.yaml:ro
+
+volumes:
+  otelcol-data:

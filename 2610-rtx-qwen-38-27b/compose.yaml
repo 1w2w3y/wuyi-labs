@@ -1,0 +1,142 @@
+# vLLM and the LiteLLM gateway for Qwen3.8-27B on an RTX Spark laptop
+# (Windows on Arm, Docker Desktop with the WSL 2 backend).
+#
+#   docker compose build                     # downloads both checkpoints into the image
+#   docker compose up -d                     # serve
+#   docker compose -f compose.yaml -f compose.observability.yaml up -d   # serve and ship metrics
+#
+# Every tunable below defaults to the profile the blog post measured; override
+# it in .env.
+services:
+  qwen3.8-27b:
+    image: local/qwen3.8-27b:nvfp4-vllm031
+    build:
+      context: .
+      dockerfile: images/vllm/Dockerfile
+    platform: linux/arm64
+    container_name: qwen3.8-27b
+    gpus: all
+    ipc: host
+    shm_size: "8gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      VLLM_ENABLE_V1_MULTIPROCESSING: "0"
+      VLLM_WORKER_MULTIPROC_METHOD: spawn
+    volumes:
+      - qwen38-vllm-cache:/root/.cache/vllm
+    command:
+      - python3
+      - -m
+      - vllm.entrypoints.openai.api_server
+      - --model
+      - /models/Qwen3.8-27B-NVFP4
+      - --served-model-name
+      - qwen3.8-27b
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --quantization
+      - compressed-tensors
+      - --trust-remote-code
+      # Up to four 1024x1024 images per prompt. Windows backs extra vision
+      # allocations with shared GPU memory, which competes with WSL and Windows.
+      - --limit-mm-per-prompt
+      - '{"image":{"count":4,"width":1024,"height":1024},"video":0}'
+      # The 4-GiB default image-processing cache is far more than this profile needs.
+      - --mm-processor-cache-gb
+      - "${QWEN38_27B_MM_PROCESSOR_CACHE_GB:-0.25}"
+      - --enable-prefix-caching
+      # Needed for DFlash 2. With the default 1,648-token hybrid page, vLLM pads
+      # every 64-token drafter page to a full page, and a 196,608-token request
+      # needs 13.5 GiB of KV cache instead of 9.2 GiB.
+      - --block-size
+      - "64"
+      - --max-model-len
+      - "${QWEN38_27B_CONTEXT_SIZE:-262144}"
+      # One request at a time; others queue. A second running request stalls
+      # decode behind its 8,192-token prefill chunks and evicts the other
+      # conversation's cached prefix.
+      - --max-num-seqs
+      - "${QWEN38_27B_MAX_NUM_SEQS:-1}"
+      - --max-num-batched-tokens
+      - "${QWEN38_27B_MAX_NUM_BATCHED_TOKENS:-8192}"
+      # With an explicit KV cache size this only sets vLLM's startup memory
+      # check; a low value keeps that check below the GPU's share of memory.
+      - --gpu-memory-utilization
+      - "${QWEN38_27B_GPU_MEMORY_UTILIZATION:-0.05}"
+      # 11.75 GiB: 740 blocks, 263,927 tokens, one full-length request.
+      - --kv-cache-memory-bytes
+      - "${QWEN38_27B_KV_CACHE_BYTES:-12616466432}"
+      - --kv-cache-dtype
+      - fp8
+      # DFlash 2 drafts seven tokens in one drafter pass; FP8 drafter weights
+      # use less memory and decode slightly faster than BF16.
+      - --speculative-config
+      - '{"method":"dflash","model":"/models/Qwen3.8-27B-DFlash2","num_speculative_tokens":7,"quantization":"fp8"}'
+      - --reasoning-parser
+      - qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    ports:
+      - "127.0.0.1:8096:8080"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=10)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15m
+    restart: unless-stopped
+    stop_grace_period: 2m
+    init: true
+
+  litellm:
+    image: ghcr.io/berriai/litellm:v1.103.2@sha256:f63fb81b831b170ec16851e23c36ac5bf52ef106b271406429524a2ed730bbfd
+    platform: linux/arm64
+    container_name: litellm
+    depends_on:
+      qwen3.8-27b:
+        condition: service_healthy
+    command:
+      - --config=/app/config.yaml
+      - --log_config=/app/uvicorn_logging.json
+    environment:
+      LITELLM_UPSTREAM_MODEL: openai/qwen3.8-27b
+      LITELLM_UPSTREAM_API_BASE: http://qwen3.8-27b:8080/v1
+      # Stamped as upstream_model on the request log and gateway metrics.
+      LITELLM_ACTIVE_MODEL: qwen3.8-27b
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+      - ./litellm/request_log_callback.py:/app/request_log_callback.py:ro
+      - ./litellm/uvicorn_logging.json:/app/uvicorn_logging.json:ro
+    ports:
+      # 127.0.0.1 by default. To reach the gateway from another machine, set
+      # LITELLM_HOST_BIND to the laptop's LAN address and restrict port 4000 to
+      # a trusted subnet in Windows Firewall: the gateway has no authentication.
+      - "${LITELLM_HOST_BIND:-127.0.0.1}:4000:4000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    init: true
+
+volumes:
+  qwen38-vllm-cache:

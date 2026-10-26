@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "litellm-local/local-llm",
+  "small_model": "litellm-local/local-llm",
+  "provider": {
+    "litellm-local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local LiteLLM (Qwen3.8-27B)",
+      "options": { "baseURL": "http://127.0.0.1:4000/v1", "apiKey": "none", "timeout": false },
+      "models": {
+        "local-llm": {
+          "name": "Qwen3.8-27B (local)",
+          "reasoning": true,
+          "tool_call": true,
+          "limit": { "context": 262144, "output": 16384 },
+          "modalities": { "input": ["text", "image"], "output": ["text"] }
+        }
+      }
+    }
+  }
+}

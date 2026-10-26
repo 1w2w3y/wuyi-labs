@@ -1,0 +1,40 @@
+# compose.observability.yaml mounts this file in place of config.yaml. It is
+# config.yaml plus the otel callback; keep the two in step.
+model_list:
+  - model_name: local-llm
+    litellm_params:
+      model: os.environ/LITELLM_UPSTREAM_MODEL
+      api_base: os.environ/LITELLM_UPSTREAM_API_BASE
+      api_key: "none"
+      request_timeout: 3600
+      timeout: 3600
+      stream_timeout: 3600
+    model_info:
+      mode: chat
+      # 262,144-token served context minus the 16,384-token output reservation.
+      max_input_tokens: 245760
+      max_output_tokens: 16384
+      max_tokens: 16384
+      supports_reasoning: true
+      supports_vision: true
+      supports_function_calling: true
+      supports_system_messages: true
+
+litellm_settings:
+  callbacks:
+    # One JSON line per request on stdout, plus litellm_e2e_* metrics.
+    - request_log_callback.proxy_handler_instance
+    # GenAI spans over OTLP to the collector, and on to Application Insights.
+    - otel
+    # LiteLLM's own metrics on /metrics/, scraped by the collector.
+    - prometheus
+  turn_off_message_logging: true
+  log_raw_request_response: false
+  require_auth_for_metrics_endpoint: false
+  request_timeout: 3600
+  num_retries: 0
+  drop_params: true
+
+router_settings:
+  timeout: 3600
+  stream_timeout: 3600

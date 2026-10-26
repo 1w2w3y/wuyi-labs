@@ -1,0 +1,123 @@
+# OpenTelemetry Collector (contrib) for a laptop that serves a local model.
+# Signals go to Application Insights through its OTLP ingestion endpoints:
+#   traces  -> DCE logs ingest -> DCR -> Log Analytics (Application Insights)
+#   metrics -> DCE metrics ingest -> DCR -> Azure Monitor workspace
+# Auth: a Microsoft Entra ID application with the Monitoring Metrics Publisher
+# role on the DCR, through the azure_auth extension. A laptop has no managed
+# identity, so the application's secret comes from .env.
+# All ${env:...} values come from compose.observability.yaml and .env.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  # Queues data on disk while the laptop is offline or Azure is unreachable.
+  file_storage:
+    directory: /var/lib/otelcol
+    create_directory: true
+  azure_auth:
+    service_principal:
+      tenant_id: ${env:AZURE_TENANT_ID}
+      client_id: ${env:AZURE_CLIENT_ID}
+      client_secret: ${env:AZURE_CLIENT_SECRET}
+    scopes:
+      - https://monitor.azure.com/.default
+
+receivers:
+  # LiteLLM GenAI spans (OTEL_ENDPOINT=http://otel-collector:4318/v1/traces).
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      global:
+        scrape_interval: 10s
+        scrape_timeout: 8s
+      scrape_configs:
+        # The model label is what the dashboard's model variable selects on.
+        - job_name: vllm
+          static_configs:
+            - targets: ["qwen3.8-27b:8080"]
+              labels: {model: qwen3.8-27b}
+        - job_name: litellm
+          metrics_path: /metrics/
+          static_configs:
+            - targets: ["litellm:4000"]
+        # windows_exporter runs on Windows itself. Docker Desktop forwards
+        # host.docker.internal to the host, so it can stay on 127.0.0.1.
+        - job_name: windows-exporter
+          static_configs:
+            - targets: ["host.docker.internal:9182"]
+          # Its default collectors produce hundreds of series. Keep the ones a
+          # local-model dashboard needs, since Azure Monitor bills per sample.
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: "nvidia_gpu_.*|windows_gpu_adapter_memory_.*|windows_memory_(available|physical_total)_bytes|windows_cpu_time_total|windows_exporter_collector_success"
+              action: keep
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+
+  # The data collection rule that Application Insights creates routes data on
+  # microsoft.applicationId, so set it on everything.
+  resource:
+    attributes:
+      - {key: microsoft.applicationId, value: "${env:AZMON_APPLICATION_ID}", action: upsert}
+      - {key: service.namespace, value: local-llm, action: upsert}
+
+  resource/default_service:
+    attributes:
+      - {key: service.name, value: local-llm-laptop, action: insert}
+
+  # The metrics rule keeps only service.*, host.name and cloud.region from the
+  # resource, so the laptop's name goes on every data point, and on every span
+  # so traces can be split the same way.
+  transform/machine:
+    error_mode: ignore
+    metric_statements:
+      - set(datapoint.attributes["machinename"], "${env:MACHINE_NAME}")
+    trace_statements:
+      - set(span.attributes["machinename"], "${env:MACHINE_NAME}")
+
+  batch:
+    send_batch_size: 2048
+    timeout: 10s
+
+exporters:
+  otlp_http/azuremonitor:
+    traces_endpoint: ${env:AZMON_TRACES_ENDPOINT}
+    metrics_endpoint: ${env:AZMON_METRICS_ENDPOINT}
+    auth:
+      authenticator: azure_auth
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 30m
+    sending_queue:
+      enabled: true
+      storage: file_storage
+
+service:
+  extensions: [health_check, file_storage, azure_auth]
+  telemetry:
+    metrics:
+      level: normal
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, transform/machine, batch]
+      exporters: [otlp_http/azuremonitor]
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, resource, resource/default_service, transform/machine, batch]
+      exporters: [otlp_http/azuremonitor]

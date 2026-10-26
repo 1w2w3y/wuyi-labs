@@ -1,0 +1,1489 @@
+{
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Agent session overview",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Requests vLLM finished in the time range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "yellow",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 1
+      },
+      "id": 101,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "round(sum(increase(vllm:request_success_total{model=\"$model\"}[$__range])))",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Requests",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Prompt tokens vLLM processed, cached or computed.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "unit": "suffix: M"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 3,
+        "y": 1
+      },
+      "id": 102,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(vllm:prompt_tokens_total{model=\"$model\"}[$__range])) / 1e6",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Input tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Tokens the model generated, reasoning included.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "purple",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 6,
+        "y": 1
+      },
+      "id": 103,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(vllm:generation_tokens_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Output tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Share of prompt tokens served from vLLM's prefix cache instead of being computed again.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "id": 104,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(vllm:prefix_cache_hits_total{model=\"$model\"}[$__range])) / sum(increase(vllm:prefix_cache_queries_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "From cache",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Output tokens per second of decode time, for requests that finished in the range: sum of generated tokens over sum of decode seconds.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "orange",
+            "mode": "fixed"
+          },
+          "decimals": 1,
+          "unit": "suffix: tok/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 1
+      },
+      "id": 105,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "histogram_sum(sum(increase(vllm:request_generation_tokens{model=\"$model\"}[$__range]))) / histogram_sum(sum(increase(vllm:request_decode_time_seconds{model=\"$model\"}[$__range])))",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Decode speed",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Tokens each decode step produced: one from the target model plus the DFlash 2 draft tokens it accepted (at most 8).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "yellow",
+            "mode": "fixed"
+          },
+          "decimals": 2,
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 1
+      },
+      "id": 106,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "1 + sum(increase(vllm:spec_decode_num_accepted_tokens_total{model=\"$model\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Tokens per step",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "GPU board power reported by nvidia-smi, averaged per minute over the range, idle gaps between agent turns included.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "id": 107,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "avg_over_time(max(nvidia_gpu_power_draw_watts{machinename=\"$host\"})[$__range:1m])",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Avg GPU power",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Highest GPU temperature reported by nvidia-smi in the range.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "purple",
+            "mode": "fixed"
+          },
+          "decimals": 0,
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "id": 108,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value"
+      },
+      "targets": [
+        {
+          "expr": "max_over_time(max(nvidia_gpu_temperature_celsius{machinename=\"$host\"})[$__range:1m])",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Peak GPU temp",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Tokens generated per second across all requests.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "suffix: tok/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "id": 109,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(vllm:generation_tokens_total{model=\"$model\"}[2m]))",
+          "legendFormat": "generated",
+          "refId": "A"
+        }
+      ],
+      "title": "Output tokens per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Generated tokens per second of decode time for requests that finished in the previous 10 minutes. With one request running at a time, this is the speed a user sees once the first token arrives.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "suffix: tok/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "id": 110,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_sum(sum(increase(vllm:request_generation_tokens{model=\"$model\"}[10m]))) / histogram_sum(sum(increase(vllm:request_decode_time_seconds{model=\"$model\"}[10m])))",
+          "legendFormat": "requests finished in the last 10 min",
+          "refId": "A"
+        }
+      ],
+      "title": "Decode speed per request",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 200,
+      "panels": [],
+      "title": "Prompts and the prefix cache",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Prompt tokens per second, split into tokens served from the prefix cache and tokens the GPU computed (prefill).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 50,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": 300000,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
+          "min": 0,
+          "unit": "suffix: tok/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 201,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(vllm:prefix_cache_queries_total{model=\"$model\"}[2m])) - sum(rate(vllm:prefix_cache_hits_total{model=\"$model\"}[2m]))",
+          "legendFormat": "computed (prefill)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(vllm:prefix_cache_hits_total{model=\"$model\"}[2m]))",
+          "legendFormat": "from prefix cache",
+          "refId": "B"
+        }
+      ],
+      "title": "Input tokens per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Mean prompt tokens of requests that finished in the previous 10 minutes. A coding agent sends the whole conversation with every turn.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 202,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_sum(sum(increase(vllm:request_prompt_tokens{model=\"$model\"}[10m]))) / histogram_count(sum(increase(vllm:request_prompt_tokens{model=\"$model\"}[10m])))",
+          "legendFormat": "mean prompt",
+          "refId": "A"
+        }
+      ],
+      "title": "Prompt size per request",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 300,
+      "panels": [],
+      "title": "Speculative decoding with DFlash 2",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "One token from the target model plus the accepted draft tokens, averaged over 5 minutes. DFlash 2 drafts 7, so the ceiling is 8.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "decimals": 1,
+          "max": 8,
+          "min": 1,
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "id": 301,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "1 + sum(rate(vllm:spec_decode_num_accepted_tokens_total{model=\"$model\"}[5m])) / sum(rate(vllm:spec_decode_num_drafts_total{model=\"$model\"}[5m]))",
+          "legendFormat": "tokens per step",
+          "refId": "A"
+        }
+      ],
+      "title": "Tokens per decode step",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "How often each of the seven drafted tokens was accepted over the range. A step stops at the first rejected token.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "decimals": 0,
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "id": 302,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 16,
+        "namePlacement": "top",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 15
+        },
+        "valueMode": "color"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(vllm:spec_decode_num_accepted_tokens_per_pos_total{model=\"$model\",position=\"0\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "draft token 1",
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "expr": "sum(increase(vllm:spec_decode_num_accepted_tokens_per_pos_total{model=\"$model\",position=\"1\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "draft token 2",
+          "range": false,
+          "refId": "B"
+        },
+        {
+          "expr": "sum(increase(vllm:spec_decode_num_accepted_tokens_per_pos_total{model=\"$model\",position=\"2\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "draft token 3",
+          "range": false,
+          "refId": "C"
+        },
+        {
+          "expr": "sum(increase(vllm:spec_decode_num_accepted_tokens_per_pos_total{model=\"$model\",position=\"3\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "draft token 4",
+          "range": false,
+          "refId": "D"
+        },
+        {
+          "expr": "sum(increase(vllm:spec_decode_num_accepted_tokens_per_pos_total{model=\"$model\",position=\"4\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "draft token 5",
+          "range": false,
+          "refId": "E"
+        },
+        {
+          "expr": "sum(increase(vllm:spec_decode_num_accepted_tokens_per_pos_total{model=\"$model\",position=\"5\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "draft token 6",
+          "range": false,
+          "refId": "F"
+        },
+        {
+          "expr": "sum(increase(vllm:spec_decode_num_accepted_tokens_per_pos_total{model=\"$model\",position=\"6\"}[$__range])) / sum(increase(vllm:spec_decode_num_drafts_total{model=\"$model\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "draft token 7",
+          "range": false,
+          "refId": "G"
+        }
+      ],
+      "title": "Acceptance by draft position",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 400,
+      "panels": [],
+      "title": "Memory on a 64 GB laptop",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "GPU memory in use against the GPU's reservation of the 64 GB of unified memory, and the shared GPU memory Windows backs with system RAM.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "GPU reservation"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 401,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(nvidia_gpu_memory_used_bytes{machinename=\"$host\"})",
+          "legendFormat": "GPU memory in use",
+          "refId": "A"
+        },
+        {
+          "expr": "max(windows_gpu_adapter_memory_shared_bytes{machinename=\"$host\",phys=\"0\"})",
+          "legendFormat": "shared GPU memory (system RAM)",
+          "refId": "B"
+        },
+        {
+          "expr": "max(nvidia_gpu_memory_total_bytes{machinename=\"$host\"})",
+          "legendFormat": "GPU reservation",
+          "refId": "C"
+        }
+      ],
+      "title": "GPU memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Physical memory Windows reports as available, after the GPU reservation, the shared GPU memory and the WSL virtual machine.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 12,
+        "y": 32
+      },
+      "id": 402,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "min"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "min(windows_memory_available_bytes{machinename=\"$host\"})",
+          "legendFormat": "available",
+          "refId": "A"
+        }
+      ],
+      "title": "Windows memory available",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Share of vLLM's 11.75 GiB KV cache in use.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 32
+      },
+      "id": 403,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(vllm:kv_cache_usage_perc{model=\"$model\"})",
+          "legendFormat": "KV cache",
+          "refId": "A"
+        }
+      ],
+      "title": "KV cache usage",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 500,
+      "panels": [],
+      "title": "Power and thermals",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "GPU board power reported by nvidia-smi.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 41
+      },
+      "id": 501,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(nvidia_gpu_power_draw_watts{machinename=\"$host\"})",
+          "legendFormat": "GPU power",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU power",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "GPU temperature reported by nvidia-smi.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "yellow",
+            "mode": "fixed"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "max": 100,
+          "min": 20,
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 41
+      },
+      "id": 502,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(nvidia_gpu_temperature_celsius{machinename=\"$host\"})",
+          "legendFormat": "GPU temperature",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU temperature",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "GPU graphics clock reported by nvidia-smi. It reads 0 while the GPU is idle.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "hertz"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 41
+      },
+      "id": 503,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(nvidia_gpu_graphics_clock_hertz{machinename=\"$host\"})",
+          "legendFormat": "graphics clock",
+          "refId": "A"
+        }
+      ],
+      "title": "GPU clock",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "id": 600,
+      "panels": [],
+      "title": "Queue and first token",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Peak requests running and waiting in vLLM per minute.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 49
+      },
+      "id": 601,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(max_over_time(vllm:num_requests_running{model=\"$model\"}[1m]))",
+          "legendFormat": "running",
+          "refId": "A"
+        },
+        {
+          "expr": "max(max_over_time(vllm:num_requests_waiting{model=\"$model\"}[1m]))",
+          "legendFormat": "waiting",
+          "refId": "B"
+        }
+      ],
+      "title": "Requests running and waiting",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Mean time to first token of requests that got their first token in the previous 10 minutes, time in the queue included. Computed from the histogram's sum and count, so it isn't limited by bucket boundaries.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 49
+      },
+      "id": 602,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_sum(sum(rate(vllm:time_to_first_token_seconds{model=\"$model\"}[10m]))) / histogram_count(sum(rate(vllm:time_to_first_token_seconds{model=\"$model\"}[10m])))",
+          "legendFormat": "mean",
+          "refId": "A"
+        }
+      ],
+      "title": "Time to first token",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Generated tokens per second of decode time for requests that finished in the previous 10 minutes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "min": 0,
+          "unit": "suffix: tok/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 49
+      },
+      "id": 603,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_sum(sum(increase(vllm:request_generation_tokens{model=\"$model\"}[10m]))) / histogram_sum(sum(increase(vllm:request_decode_time_seconds{model=\"$model\"}[10m])))",
+          "legendFormat": "decode speed",
+          "refId": "A"
+        }
+      ],
+      "title": "Decode speed per request",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Share of prompt tokens served from the prefix cache over the previous 5 minutes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": 300000
+          },
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 49
+      },
+      "id": 604,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(vllm:prefix_cache_hits_total{model=\"$model\"}[5m])) / sum(rate(vllm:prefix_cache_queries_total{model=\"$model\"}[5m]))",
+          "legendFormat": "hit rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Prefix-cache hit rate",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 41,
+  "tags": [
+    "rtx-spark",
+    "vllm",
+    "qwen"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Data source",
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource",
+        "options": [],
+        "regex": ""
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(nvidia_gpu_power_draw_watts, machinename)",
+        "hide": 0,
+        "label": "Machine",
+        "name": "host",
+        "query": {
+          "query": "label_values(nvidia_gpu_power_draw_watts, machinename)",
+          "refId": "host"
+        },
+        "refresh": 1,
+        "type": "query",
+        "current": {},
+        "options": []
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(vllm:num_requests_running, model)",
+        "hide": 0,
+        "label": "Model",
+        "name": "model",
+        "query": {
+          "query": "label_values(vllm:num_requests_running, model)",
+          "refId": "model"
+        },
+        "refresh": 1,
+        "type": "query",
+        "current": {},
+        "options": []
+      }
+    ]
+  },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "title": "RTX Spark laptop: Qwen3.8-27B",
+  "uid": "rtx-spark-qwen38",
+  "version": 1,
+  "description": "Qwen3.8-27B served by vLLM on an RTX Spark laptop (Windows on Arm, unified memory): agent-session totals, prompts and the prefix cache, DFlash 2 speculative decoding, GPU and Windows memory, power and thermals, and the request queue."
+}

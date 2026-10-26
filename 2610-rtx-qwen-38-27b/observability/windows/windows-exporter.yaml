@@ -1,0 +1,23 @@
+# windows_exporter configuration for a laptop that serves a local model.
+# Install the ARM64 MSI from https://github.com/prometheus-community/windows_exporter/releases,
+# copy this file over C:\Program Files\windows_exporter\config.yaml and restart
+# the windows_exporter service (see README.md).
+collectors:
+  # [defaults] includes cpu, memory (windows_memory_available_bytes) and os.
+  # gpu adds the dedicated and shared GPU memory Windows reports for the GPU.
+  # textfile serves the nvidia_gpu_* metrics that scripts\Export-NvidiaGpuMetrics.ps1 writes.
+  enabled: "[defaults],gpu,textfile"
+
+collector:
+  textfile:
+    directories:
+      - 'C:\ProgramData\local-llm\textfile'
+
+log:
+  level: warn
+  file: eventlog
+
+web:
+  # Docker Desktop forwards host.docker.internal:9182 from the collector's container
+  # to this loopback address, so the exporter needs no LAN exposure.
+  listen-address: "127.0.0.1:9182"
