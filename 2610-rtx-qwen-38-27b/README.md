@@ -1,7 +1,6 @@
 # Qwen3.8-27B on an RTX Spark laptop
 
-Sample code for the blog post *A 27B coding model on a 16-inch laptop: the Lenovo Yoga 9n 2-in-1 with RTX
-Spark runs Qwen3.8-27B*.
+Sample code for the blog post *Qwen3.8-27B on a laptop: run it on RTX Spark, watch it in Azure Monitor*.
 
 It serves [Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) on a Windows on Arm laptop with NVIDIA
 RTX Spark and 64 GB of unified memory, with Docker Compose, for one coding agent at a time. It also
