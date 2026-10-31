@@ -249,6 +249,8 @@ done
 Read it with the productivity block. High tok/s with low coverage means the
 model is busy talking to itself, and that throughput buys nothing.
 
+Runs worth keeping are in [`RESULTS.md`](RESULTS.md).
+
 ## Telemetry
 
 Set one environment variable and the run exports OTLP over HTTP: spans, metrics
