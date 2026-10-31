@@ -228,6 +228,10 @@ class Agent(threading.Thread):
         env = dict(os.environ)
         env["OPENCODE_CONFIG_CONTENT"] = self.cfg_path.read_text(encoding="utf-8")
         env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+        # opencode takes its directory from PWD ahead of the process's real
+        # cwd, and the entrypoint's `cd` leaves PWD at /opt/agent-bench. From
+        # there the corpus is an external directory, so every read is denied.
+        env["PWD"] = str(self.repo)
         # Give every agent its own opencode state, so concurrent sessions do
         # not contend on one store.
         state = self.state_root / self.label
@@ -390,6 +394,7 @@ def smoke_opencode(opencode_bin, cfg_text, model, timeout=180, attempts=2):
         env = dict(os.environ)
         env["OPENCODE_CONFIG_CONTENT"] = cfg_text
         env["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+        env["PWD"] = tmp  # as in Agent._one_session
         for var, sub in (("XDG_DATA_HOME", "data"), ("XDG_CACHE_HOME", "cache"),
                          ("XDG_STATE_HOME", "state"), ("XDG_CONFIG_HOME", "config")):
             d = Path(tmp) / sub
