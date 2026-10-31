@@ -10,7 +10,7 @@ It serves [Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B-FP8) (official F
 client
   -> ngrok public URL (IP allow-list)
     -> LiteLLM gateway  127.0.0.1:4000   alias "local-llm", OTel traces, Prometheus metrics
-      -> vLLM           127.0.0.1:8096   Qwen3.8-27B FP8, MTP speculative decoding, prefix caching
+      -> vLLM v0.32.0   127.0.0.1:8096   Qwen3.8-27B FP8, MTP speculative decoding, prefix caching
 
 OpenTelemetry Collector -> Application Insights (traces, logs) + Azure Monitor workspace (metrics)
                         -> Grafana dashboard (observability/grafana/h100-llm.json)
@@ -76,6 +76,8 @@ scripts/vm-power.sh stop|start|status         # deallocate / start (the stack re
 scripts/vm-run.sh -c 'docker logs --tail 50 qwen3.8-27b'
 scripts/vm-run.sh scripts/bench.sh            # vllm bench serve at concurrency 1/4/16/32 + shared prefix
 scripts/vm-run.sh -c 'python3 /opt/llm-self-hosting/scripts/realtext.py 1 32'   # real-text decode speed
+scripts/vm-run.sh -c 'LABEL=before bash /opt/llm-self-hosting/scripts/measure.sh'   # smoke test + real text + bench under a label, for A/B tests
+scripts/vm-run.sh scripts/profile-decode-step.sh   # where a decode step's time goes (needs QWEN38_27B_PROFILER_CONFIG, see its header)
 az group delete -n <resource-group> --yes     # remove everything
 ```
 
@@ -84,14 +86,58 @@ az group delete -n <resource-group> --yes     # remove everything
 
 ## What we measured
 
-One H100 NVL, vLLM 26.07 (NGC), MTP with 3 speculative tokens, FP8 KV cache, October 2026:
+One H100 NVL, MTP with 3 speculative tokens, FP8 KV cache, October 2026. The first two columns are the post's
+figures on NVIDIA's NGC vLLM 26.07 image (vLLM 0.24); the third is the same VM and flags on vLLM 0.32, which the
+sample serves through now (see [What changed since the post](#what-changed-since-the-post)):
 
-| | BF16 checkpoint | FP8 checkpoint |
-|---|---|---|
-| Weights in GPU memory | 51.9 GiB | 29.0 GiB |
-| KV cache | 805K tokens (GPU memory 0.90) | 1.5M tokens (GPU memory 0.93) |
-| Single-stream decode, 512 tokens, thinking off | 124 tok/s | 165-172 tok/s |
-| Real text, 32 concurrent requests | not measured | ~1,550 output tok/s |
+| | BF16 checkpoint, NGC 26.07 | FP8 checkpoint, NGC 26.07 | FP8 checkpoint, vLLM 0.32 |
+|---|---|---|---|
+| Weights in GPU memory | 51.9 GiB | 29.0 GiB | 29.0 GiB |
+| KV cache | 805K tokens (GPU memory 0.90) | 1.5M tokens (GPU memory 0.93) | 1.5M tokens (GPU memory 0.93) |
+| Single-stream decode, 512 tokens, thinking off | 124 tok/s | 165-172 tok/s | 180 tok/s |
+| Inter-token latency p50, single stream | not measured | 17.7 ms | 15.8 ms |
+| Random prompts (2,000 in / 512 out), 1 / 4 / 16 / 32 streams | not measured | 146 / 376 / 931 / 1,161 tok/s | 154 / 487 / 1,115 / 1,233 tok/s |
+
+The post's real-text figure, ~1,550 output tok/s at 32 concurrent requests, was measured on the NGC image with
+`realtext.py`; the random-prompt row is `bench.sh` on one VM before and after the image change, which is the
+like-for-like comparison.
+
+## What changed since the post
+
+The post describes the model on NVIDIA's NGC vLLM 26.07 image (vLLM 0.24), with a derived image that patched
+xgrammar so tool calls would work. On 2026-10-31 the sample moved to vLLM's own `vllm/vllm-openai:v0.32.0` image
+after an A/B on one fresh Spot VM, same flags, MTP with 3 draft tokens on both:
+
+- **vLLM 0.32 runs this model on Model Runner V2, and the gain is largest where a shared server lives.**
+  Single-stream decode through the gateway went from 172.0 to 179.7 tok/s (inter-token latency p50 17.7 to
+  15.8 ms); on random 2,000-in / 512-out prompts from 145.7 to 153.6 tok/s at 1 stream, 376.1 to 487.0 at 4,
+  931.1 to 1,115.3 at 16 and 1,160.9 to 1,233.1 at 32. The KV cache is 0.6% smaller, 1,505,497 to 1,496,710
+  tokens, because 0.32 reserves CUDA-graph memory up front. A 45-case capability eval scored 44/45 on both
+  images; on 10 Terminal-Bench 2.0 tasks driven by opencode the model went from 3-4/10 to 7/10, with the
+  "one tool call, then stop" failure down from 3-6 tasks to 1. A cold start takes about 5 minutes (32 s of
+  torch.compile), a warm restart under 2.
+- **The xgrammar workaround is gone.** 0.32 bundles an xgrammar with `normalize_tool_choice`, so
+  `compose.yaml` pulls the stock image, the Dockerfile that installed xgrammar 0.2.3 on the NGC image is
+  deleted, and the tool-call check in `smoke-test.sh` passes.
+- **`--async-scheduling` is on by default.** The explicit flag measured no difference (179.65 against
+  179.66 tok/s, identical real-text figures): vLLM 0.32 resolves it to on for MTP and DFlash drafting. It
+  stays in `compose.yaml` as documentation of the setting.
+- **A DFlash 2 drafter was tried and left off.** `incoai/Qwen3.8-27B-DFlash2` (7 draft tokens, FP8, needs
+  `--block-size 64`) is the fastest configuration for one request, 218 tok/s through the gateway and 234 at
+  1 stream on random prompts (+20-50%), but a shared server pays for it: 10-12% less throughput at 16-32
+  streams, 25% less KV cache (1,118,692 tokens) and 29% less shared-prefix throughput, with prefix-cache hits
+  halved and time to first token tripled, so MTP 3 stays the default. `model-download` fetches the drafter
+  beside the checkpoint; to switch, set `QWEN38_27B_SPEC_CONFIG` to the DFlash line commented in
+  `.env.example` and `QWEN38_27B_BLOCK_SIZE=64`, then redeploy.
+- **Where a decode step goes.** `scripts/profile-decode-step.sh` records 60 engine steps of one code request
+  with vLLM's torch profiler, and `scripts/decode-step-phases.py` reads the trace: 15.7 ms per step with the
+  GPU busy 96% of it, 46% in the FP8 MLP GEMMs, 19% in the BF16 lm_head (read once per MTP draft token plus
+  once for the target) and 8% in the Gated DeltaNet projections. With almost no idle time per step there is
+  little left for async scheduling to hide, which is why the explicit flag measured nothing.
+
+`scripts/measure.sh` is the before/after measurement behind these numbers: smoke test, real text at 1/4/32
+streams and `bench.sh`, under a label, with a warm-up pass first (the first real-text pass after a start runs
+40-50% slower at 4 and 32 streams than the next).
 
 ## Dashboard
 

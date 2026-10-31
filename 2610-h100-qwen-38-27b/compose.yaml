@@ -1,6 +1,12 @@
 # Core stack on the Azure H100 VM: pinned model download -> vLLM -> LiteLLM.
 # Overlays: compose.observability.yaml (telemetry), compose.ngrok.yaml (public URL).
 # Every port binds to 127.0.0.1; the VM itself has no public IP.
+#
+# The model server is vLLM's own v0.32.0 release image (CUDA 13.0). It runs
+# this model on Model Runner V2 and bundles an xgrammar with
+# normalize_tool_choice, so the NGC 26.07 image with a patched xgrammar that
+# the blog post describes is no longer needed, and it decodes faster
+# (README.md, "What changed since the post").
 name: llm
 
 x-logging: &logging
@@ -13,31 +19,39 @@ x-logging: &logging
     labels-regex: '^(observability\.|com\.docker\.compose\.service$)'
 
 services:
-  # One-shot job: fetch the pinned checkpoint into /data/models. Uses the vLLM
-  # image's bundled `hf` CLI, so no extra image is needed. Re-runs only verify
-  # the local copy.
+  # One-shot job: fetch the pinned checkpoint, and the DFlash drafter when
+  # .env names one, into /data/models with the vLLM image's huggingface_hub,
+  # so no extra image is needed. Re-runs only verify the local copies.
   model-download:
-    image: nvcr.io/nvidia/vllm:26.07-py3@sha256:95c498a475142c20c989c65e5d223348c09fed83ba17ddf44f117610c0bd3268
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     container_name: llm-model-download
     environment:
       HF_TOKEN: "${HF_TOKEN:-}"
       HF_XET_HIGH_PERFORMANCE: "1"
+      MODEL_REPO: "${MODEL_REPO:-Qwen/Qwen3.8-27B-FP8}"
+      MODEL_REVISION: "${MODEL_REVISION:-017b9c7af6b5689d5dd426a76e0bc077eb5ca20a}"
+      MODEL_DIR: "${MODEL_DIR:-Qwen3.8-27B-FP8}"
+      DRAFT_REPO: "${DRAFT_REPO:-}"
+      DRAFT_REVISION: "${DRAFT_REVISION:-}"
+      DRAFT_DIR: "${DRAFT_DIR:-}"
+    entrypoint: ["python3", "-c"]
     command:
-      - bash
-      - -c
-      - >-
-        hf download "${MODEL_REPO:-Qwen/Qwen3.8-27B-FP8}"
-        --revision "${MODEL_REVISION:-017b9c7af6b5689d5dd426a76e0bc077eb5ca20a}"
-        --local-dir "/models/${MODEL_DIR:-Qwen3.8-27B-FP8}"
+      - |
+        import os
+        from huggingface_hub import snapshot_download
+        for p in ("MODEL", "DRAFT"):
+            if not os.environ.get(f"{p}_REPO"):
+                continue
+            path = snapshot_download(os.environ[f"{p}_REPO"], revision=os.environ[f"{p}_REVISION"],
+                                     local_dir="/models/" + os.environ[f"{p}_DIR"])
+            print("checkpoint ready:", path)
     volumes:
       - /data/models:/models
     logging: *logging
     restart: "no"
 
   qwen3.8-27b:
-    image: local/vllm:26.07-xgrammar0.2.3
-    build:
-      context: images/vllm
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     container_name: qwen3.8-27b
     depends_on:
       model-download:
@@ -53,15 +67,12 @@ services:
     volumes:
       - /data/models:/models:ro
       - /data/vllm-cache:/root/.cache/vllm
+    # The image's entry point is `vllm serve`; these are its arguments.
     command:
-      - python3
-      - -m
-      - vllm.entrypoints.openai.api_server
       # Official FP8 checkpoint (E4M3, 128x128 block scales, dynamic
       # activations); vLLM reads its quantization_config, so no --quantization
       # flag. Embeddings, lm_head, linear-attention gates and the vision tower
       # stay BF16. H100 runs FP8 natively; it has no FP4 tensor cores.
-      - --model
       - /models/${MODEL_DIR:-Qwen3.8-27B-FP8}
       - --served-model-name
       - qwen3.8-27b
@@ -82,10 +93,25 @@ services:
       - --kv-cache-dtype
       - fp8
       - --enable-prefix-caching
-      - --spec-method
-      - mtp
-      - --spec-tokens
-      - "${QWEN38_27B_SPEC_TOKENS:-3}"
+      # The attention block, in tokens (16 is vLLM's default). vLLM rounds
+      # the hybrid model's attention page up to a multiple of its Gated
+      # DeltaNet state, 1,648 tokens at 16; the DFlash drafter's 64-token
+      # sliding-window kernel needs 64, which makes that 1,664.
+      - --block-size
+      - "${QWEN38_27B_BLOCK_SIZE:-16}"
+      # Speculative decoding (QWEN38_27B_SPEC_CONFIG in .env): the
+      # checkpoint's MTP head, or the DFlash 2 block drafter.
+      - --speculative-config
+      - '${QWEN38_27B_SPEC_CONFIG:-{"method":"mtp","num_speculative_tokens":3}}'
+      # The scheduler prepares step N+1 while the GPU runs step N instead of
+      # waiting for its sampled tokens. vLLM 0.32 turns this on by default
+      # for MTP and DFlash drafting; the flag pins it (measured no difference
+      # with or without it, README.md).
+      - --async-scheduling
+      # Off by default; QWEN38_27B_PROFILER_CONFIG in .env turns the torch
+      # profiler on for scripts/profile-decode-step.sh.
+      - --profiler-config
+      - '${QWEN38_27B_PROFILER_CONFIG:-{}}'
       - --limit-mm-per-prompt
       - '{"image":{"count":4,"width":1024,"height":1024},"video":0}'
       - --reasoning-parser

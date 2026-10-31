@@ -11,7 +11,7 @@ with Docker Compose:
 client
   -> ngrok public URL (IP allow-list)
     -> LiteLLM gateway  127.0.0.1:4000   alias "local-llm", OTel traces, Prometheus metrics
-      -> vLLM v0.31.0   127.0.0.1:8096   tensor parallel across both GPUs, FP8 KV cache, MTP, prefix caching
+      -> vLLM v0.32.0   127.0.0.1:8096   tensor parallel across both GPUs, FP8 KV cache, MTP, prefix caching
 
 OpenTelemetry Collector -> Application Insights (traces, logs) + Azure Monitor workspace (metrics)
                         -> Grafana dashboard (observability/grafana/h100-llm.json)
@@ -117,6 +117,12 @@ Eight read-only review agents with 122K-token median prompts (see below) on the 
 similar agent traffic (112K-token median prompts) on the BF16 cache: requests running averaged 6.4 instead of
 3.3, the prefix cache served 74% of input instead of 58%, preemptions fell from 30 to 0, and time to first token
 at p95 from 23.8 s to 11.0 s.
+
+Since 2026-10-31 the sample serves through vLLM v0.32.0, the same image as the one-GPU Qwen3.8-27B sample. Measured
+against v0.31.0 on the same VM with the same flags, 0.32 is the same speed within noise under load, because this
+model already ran on vLLM's Model Runner V2 in 0.31; the KV cache grew 1% (1,506,691 to 1,521,962 tokens), the
+45-case eval scored 44/45 as before, and the smoke test's single fixed request went from 243 to 268 tok/s.
+`--async-scheduling` is explicit in `compose.yaml` now, though 0.32 turns it on by default for MTP drafting.
 
 ## Load it with coding agents
 

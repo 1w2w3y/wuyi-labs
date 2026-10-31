@@ -18,7 +18,7 @@ services:
   # image's huggingface_hub, so no extra image is needed. Re-runs only verify
   # the local copy.
   model-download:
-    image: vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     container_name: llm-model-download
     environment:
       HF_TOKEN: "${HF_TOKEN:-}"
@@ -41,10 +41,12 @@ services:
 
   # Qwen3.8-Flash-Next (125B MoE, 6B active per token, plus a 51B n-gram
   # table) from Qwen's FP8 checkpoint, in tensor parallel across the VM's two
-  # H100 NVL. vLLM's own v0.31.0 image: NVIDIA's NGC vLLM 26.07 predates this
-  # architecture (Qwen4ExpForConditionalGeneration) and its MTP layer.
+  # H100 NVL. vLLM's own v0.32.0 image (CUDA 13.0), which serves this
+  # architecture (Qwen4ExpForConditionalGeneration) and its MTP layer; the
+  # post used v0.31.0, which already ran this model on Model Runner V2, so
+  # 0.32 is the same speed here with 1% more KV cache (README.md).
   qwen3.8-flash-next-vllm:
-    image: vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
+    image: vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
     container_name: qwen3.8-flash-next-vllm
     depends_on:
       model-download:
@@ -100,6 +102,10 @@ services:
       - mtp
       - --spec-tokens
       - "${QWEN38_FLASH_NEXT_SPEC_TOKENS:-3}"
+      # The scheduler prepares step N+1 while the GPUs run step N instead of
+      # waiting for its sampled tokens. vLLM 0.32 turns this on by default
+      # for MTP drafting; the flag pins it (README.md).
+      - --async-scheduling
       - --limit-mm-per-prompt
       - '{"image":{"count":4,"width":1024,"height":1024},"video":0}'
       - --reasoning-parser
