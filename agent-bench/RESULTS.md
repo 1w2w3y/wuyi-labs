@@ -5,12 +5,14 @@ Headline numbers from agent-bench runs worth keeping. Full bundles stay in
 
 ## Qwen3.8-27B, one agent, six files
 
-Qwen3.8-27B behind a LiteLLM gateway, under the alias `local-llm`, with one
-agent reviewing the first six files of the `agent-framework-review` queue
-(`AGENTS=1`, `MAX_FILES=6`, 69,534 bytes) at corpus commit `ebcf4db7f946`, with
-opencode 1.19.0. The gateway returned no cached-token counts, so these runs have
-no prompt-cache figure. Six files is a small sample: use it to check the setup,
-not to plan capacity.
+Qwen3.8-27B served by vLLM behind a LiteLLM gateway, under the alias
+`local-llm`, as in this repository's Qwen3.8-27B samples. The model ran on one
+machine, and the agent ran in Docker on a second machine on the same local
+network. One agent reviewed the first six files of the `agent-framework-review`
+queue (`AGENTS=1`, `MAX_FILES=6`, 69,534 bytes) at corpus commit
+`ebcf4db7f946`, with opencode 1.19.0. The gateway returned no cached-token
+counts, so these runs have no prompt-cache figure. Six files is a small sample:
+use it to check the setup, not to plan capacity.
 
 | | `20261031T010103Z` (invalid) | `20261031T011604Z` |
 |---|---|---|
