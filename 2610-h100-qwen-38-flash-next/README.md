@@ -1,6 +1,6 @@
 # Qwen3.8-Flash-Next on two H100s in an Azure Spot VM
 
-Sample code for the blog post *Qwen3.8-Flash-Next on two Azure H100s: run it, then watch it work*.
+Sample code for the blog post [*Qwen3.8-Flash-Next on two H100s in an Azure Spot VM*](https://techcommunity.microsoft.com/blog/appsonazureblog/qwen3-8-flash-next-on-two-h100s-in-an-azure-spot-vm/4563893).
 
 It serves [Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next-FP8) (official FP8 checkpoint), a
 125B mixture-of-experts model with 6B parameters active per token, from one `Standard_NC80adis_H100_v5` VM

@@ -1,6 +1,6 @@
 # Qwen3.8-27B on an H100 Azure Spot VM
 
-Sample code for the blog post *Qwen3.8-27B on a $2 H100 Azure Spot VM: does it pay off?*
+Sample code for the blog post [*Qwen3.8-27B on a $2 H100 Azure Spot VM: does it pay off?*](https://techcommunity.microsoft.com/blog/appsonazureblog/qwen3-8-27b-on-a-2-h100-azure-spot-vm-does-it-pay-off/4563387).
 
 It serves [Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B-FP8) (official FP8 checkpoint) from one
 `Standard_NC40ads_H100_v5` VM (1x H100 NVL, 94 GB) on

@@ -1,6 +1,6 @@
 # Qwen3.8-27B on an RTX Spark laptop
 
-Sample code for the blog post *Qwen3.8-27B on a laptop: run it on RTX Spark, watch it in Azure Monitor*.
+Sample code for the blog post [*Qwen3.8-27B on a Lenovo laptop: run it on RTX Spark, watch it in Azure Monitor*](https://techcommunity.microsoft.com/blog/appsonazureblog/qwen3-8-27b-on-a-lenovo-laptop-run-it-on-rtx-spark-watch-it-in-azure-monitor/4567828).
 
 It serves [Qwen3.8-27B](https://huggingface.co/Qwen/Qwen3.8-27B) on a Windows on Arm laptop with NVIDIA
 RTX Spark and 64 GB of unified memory, with Docker Compose, for one coding agent at a time. It also
