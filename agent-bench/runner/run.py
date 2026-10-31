@@ -183,9 +183,10 @@ class Agent(threading.Thread):
     def _unread(self, files, before):
         """Which of these files the agent never actually read.
 
-        Coverage comes from the read tool calls the proxy saw, not from the
-        agent's own account of itself. A model that reports findings for a file
-        it never opened counts as not having reviewed it.
+        Coverage comes from the read results the proxy saw, not from the
+        agent's own account of itself or from what it asked for. A model that
+        reports findings for a file it never opened, or could not open, counts
+        as not having reviewed it.
         """
         new = self.recorder.reads_for(self.label) - before
         touched = set()

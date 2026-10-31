@@ -19,6 +19,7 @@ that chunk: it carries no choices.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -45,11 +46,17 @@ def _inflight_add(delta):
         _inflight += delta
 READ_TOOLS = ("read", "Read", "view", "cat")
 
+# opencode's read tool wraps a file in these tags; a refusal or an error comes
+# back as plain text in the same place. Matching the success shape rather than
+# the error strings means a format change in a new opencode shows up as files
+# unread, which is loud, and not as a review that never happened.
+READ_RESULT = re.compile(r"\s*<path>(.+?)</path>\s*<type>file</type>")
+
 
 class Recorder:
     """Append-only JSONL sink shared by every proxy thread.
 
-    Also keeps, per agent, the set of paths that agent asked to read. The
+    Also keeps, per agent, the set of paths whose reads returned the file. The
     orchestrator reads this back after each session to tell "reviewed" from
     "declared done without looking", and to re-drive what was skipped.
     """
@@ -66,9 +73,14 @@ class Recorder:
             self._fh.write(line + "\n")
             self._fh.flush()
             self.count += 1
-            paths = row.get("read_paths")
-            if paths:
-                self._reads.setdefault(row.get("agent") or "", set()).update(paths)
+
+    def confirm_reads(self, agent, paths):
+        """Note reads that returned a file. Returns the ones not seen before."""
+        with self._lock:
+            known = self._reads.setdefault(agent or "", set())
+            new = [p for p in dict.fromkeys(paths) if p not in known]
+            known.update(new)
+            return new
 
     def reads_for(self, agent):
         with self._lock:
@@ -84,8 +96,26 @@ def _collapse_tool_deltas(acc):
     return [{"name": acc[i][0], "arguments": acc[i][1]} for i in sorted(acc)]
 
 
+def confirmed_reads(messages):
+    """File paths that read calls actually returned, from a request's history.
+
+    A tool call only says what the agent asked for. Its result comes back in
+    the next request as a `tool` message, the first point on the wire where a
+    read can be told from a denied or failed one. The path is the one the
+    result names, resolved by the agent.
+    """
+    paths = []
+    for message in messages:
+        content = message.get("content")
+        if message.get("role") == "tool" and isinstance(content, str):
+            match = READ_RESULT.match(content)
+            if match:
+                paths.append(match.group(1))
+    return paths
+
+
 def read_paths(tool_calls):
-    """File paths the agent asked to read, for coverage accounting."""
+    """File paths the agent asked to read, whether or not it got them."""
     paths = []
     for call in tool_calls:
         if call.get("name") not in READ_TOOLS:
@@ -163,6 +193,11 @@ class Handler(BaseHTTPRequestHandler):
             "n_messages": len(((payload or {}).get("messages")) or []),
             "n_tools_offered": len(((payload or {}).get("tools")) or []),
         }
+        # Noted on arrival rather than with the row, which is written when this
+        # request ends: that can be after the session that needs it has ended.
+        if self.recorder is not None:
+            row["read_ok_paths"] = self.recorder.confirm_reads(
+                self.agent, confirmed_reads((payload or {}).get("messages") or []))
         started = time.monotonic()
 
         span = None
@@ -240,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
                 "agent_bench.reasoning_tokens": row.get("reasoning_tokens"),
                 "agent_bench.ttft_seconds": row.get("ttft_s"),
                 "agent_bench.tool_calls": row.get("tool_calls") or None,
-                "agent_bench.files_read": len(row.get("read_paths") or []) or None,
+                "agent_bench.files_read": len(row.get("read_ok_paths") or []) or None,
                 "http.response.status_code": row.get("status"),
             }
         )

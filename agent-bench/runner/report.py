@@ -160,20 +160,16 @@ def build(out_dir, meta, files, scenario):
 
     mean_conc, peak_conc = _concurrency_profile(ok)
 
-    # Coverage from the wire, not from what the agents claimed.
-    queue = [f for f, _ in files]
-    reviewed = set()
-    for r in ok:
-        for raw in r.get("read_paths") or []:
-            p = raw.replace("\\", "/").lstrip("./")
-            for f in queue:
-                if p == f or p.endswith(f):
-                    reviewed.add(f)
-                    break
-    abandoned = sorted(set(queue) - reviewed)
-
     sessions = [s for a in meta.get("agent_sessions") or []
                 for s in a.get("sessions") or []]
+
+    # Coverage from what each session checked on the wire, not from what the
+    # agents claimed.
+    queue = [f for f, _ in files]
+    reviewed = {f for s in sessions for f in s.get("files") or []
+                if f not in (s.get("missed") or [])}
+    abandoned = sorted(set(queue) - reviewed)
+
     timed_out = sum(1 for s in sessions if s.get("timed_out"))
     redriven = sum(1 for s in sessions if s.get("attempt", 1) > 1)
 

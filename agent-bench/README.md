@@ -87,9 +87,10 @@ which files the agent actually read, and re-drives the ones it skipped
 number means the same thing for every model. Set `retries_per_batch: 0` to
 measure instead how much work a model abandons when left alone.
 
-Coverage comes from the `read` tool calls the proxy saw, never from the agent's
-own account of itself: a model that reports findings on a file it never opened
-counts as not having reviewed it.
+Coverage comes from the `read` results the proxy saw come back, never from the
+agent's own account of itself or from what it asked for: a read that was denied
+or failed does not count, and a model that reports findings on a file it never
+opened counts as not having reviewed it.
 
 ### The `/goal` mode
 
@@ -110,8 +111,10 @@ discovery, so both paths use one source of truth.
 
 The proxy records, per request: prompt and completion tokens, cached prompt
 tokens, reasoning tokens, TTFT, mean inter-token latency, tool calls, the files
-read, and the finish reason. It adds `stream_options.include_usage` so the
-gateway returns exact counts; agents ignore that chunk.
+the agent asked to read (`read_paths`) and those that came back
+(`read_ok_paths`), and the finish reason. It adds
+`stream_options.include_usage` so the gateway returns exact counts; agents
+ignore that chunk.
 
 This is deliberate rather than reading opencode's own telemetry.
 `opencode run --format json` emitted **nothing** on runs that otherwise worked,
@@ -384,6 +387,11 @@ A healthy OTLP endpoint answers `200` with `{"partialSuccess":{}}`.
   Bumping it changes the benchmark; record the change with your numbers. If a
   pinned SHA is gone from the server, `fetch.sh` falls back to `HEAD` and says
   so — numbers from that run are not comparable.
+- **Coverage depends on the shape of opencode's read result.** The wire says
+  what was asked for, but only the agent's tool output says whether it worked,
+  so the proxy matches the tags opencode wraps a file in. If a new opencode
+  changes them, files read as unreviewed and get re-driven. Check coverage
+  whenever you bump the version.
 - **Reasoning tokens count as output.** They are billed and they occupy the
   decoder, so they belong in the throughput figure; `reasoning_tokens` is
   reported separately if you want it excluded.
