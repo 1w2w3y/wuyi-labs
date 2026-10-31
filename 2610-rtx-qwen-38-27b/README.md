@@ -29,7 +29,7 @@ Windows (host)                                     Docker Desktop (WSL 2, linux/
 | Path | What it is |
 |---|---|
 | `compose.yaml` | vLLM and the LiteLLM gateway, with the profile the post measured |
-| `images/vllm/Dockerfile` | vLLM 0.31 (official ARM64 image) with both checkpoints downloaded at pinned revisions |
+| `images/vllm/Dockerfile` | vLLM 0.32 (official ARM64 image) with both checkpoints downloaded at pinned revisions |
 | `litellm/` | gateway config (`config.otel.yaml` adds OpenTelemetry spans), and a callback that logs one JSON line and `litellm_e2e_*` metrics per request |
 | `config/wslconfig.example`, `config/opencode.json` | the WSL memory cap and the OpenCode provider block |
 | `compose.observability.yaml`, `observability/otelcol/config.yaml` | the OpenTelemetry Collector: scrape, receive spans, label, send over OTLP to Azure Monitor |
@@ -59,6 +59,11 @@ copy `config/wslconfig.example` to `%UserProfile%\.wslconfig`, or merge it into 
 ```powershell
 wsl --shutdown
 ```
+
+Keep `autoMemoryReclaim` under `[wsl2]`: WSL 2.0 took it under `[experimental]`, WSL 3.x takes it
+under `[wsl2]`. The cap is worth checking after a WSL or Docker Desktop update: without it, the VM's page
+cache grows with every model start until Windows pages, and the model ran 15-25% slower (What we
+measured).
 
 **2. Build and serve.** The build downloads both checkpoints into the image, so the stack starts offline.
 Stop the model before large downloads or builds: they need memory of their own.
@@ -185,18 +190,30 @@ agent session. Run it from a second machine, since each agent needs memory of it
 
 ## What we measured
 
-Lenovo Yoga 9n 2-in-1 with the 20-core RTX Spark N1X and 64 GB, 32 GB for the GPU, vLLM 0.31, the
-NVFP4 checkpoint and the DFlash 2 drafter in FP8 proposing seven tokens, an FP8 KV cache:
+Lenovo Yoga 9n 2-in-1 with the 20-core RTX Spark N1X and 64 GB, 32 GB for the GPU, the NVFP4
+checkpoint and the DFlash 2 drafter in FP8 proposing seven tokens, an FP8 KV cache. The post measured
+vLLM 0.31 on 2026-10-13; the profile here is vLLM 0.32 with `--async-scheduling`, measured on
+2026-10-30 with the same prompts and the WSL cap in place:
 
-| | Result |
-|---|---|
-| Code benchmark, one request | 44.7 tok/s decode, mean of three; 5.04 tokens per decode step |
-| 98K-token prompt, one request | 44.3 tok/s decode, 1,033 tok/s prefill |
-| Three hours of an OpenCode agent reviewing two repositories | about 27 tok/s decode per request; GPU 41 W on average, 67 °C at peak |
-| KV cache | 263,927 tokens: one full-length request |
+| | vLLM 0.31 (the post) | vLLM 0.32, async scheduling |
+|---|---|---|
+| Code benchmark, one request | 44.7 tok/s decode, mean of three; 5.04 tokens per decode step | 47.6 tok/s decode, mean of six; 4.92 tokens per step; 9.70 decode steps/s |
+| 27K-token prompt, one request | | 51.7 tok/s decode, 1,438 tok/s prefill |
+| 98K-token prompt, one request | 44.3 tok/s decode, 1,033 tok/s prefill | 51.0 tok/s decode, 838 tok/s prefill, minutes after a model start |
+| Three hours of an OpenCode agent reviewing two repositories | about 27 tok/s decode per request; GPU 41 W on average, 67 °C at peak | |
+| KV cache | 263,927 tokens: one full-length request | same |
 
-The two benchmarks ran on the 196,608-token build of this profile; on the 262,144-token profile here,
-the code benchmark measured 44.1 tok/s.
+Step for step, 0.32 decodes 7-9% faster than 0.31 on the same prompts, and `--async-scheduling` adds
+about 5% with identical outputs; together, 9.70 decode steps a second against 8.53 for the 0.31 profile
+measured the day before. The three evaluation suites pass and fail the same cases on both versions.
+The post's two benchmarks ran on the 196,608-token build of the 0.31 profile; on the 262,144-token
+profile the code benchmark measured 44.1 tok/s.
+
+The WSL cap matters as much as the version. Uncapped, the VM's page cache grows at every model start
+until Windows pages, and the model's shared GPU memory is what gets paged: the same 0.32 profile then
+decoded 15-25% slower and prefilled the 98K-token prompt 40% slower. The first benchmark after a model
+start is slow for a few minutes either way, while the weights stream through; `\Memory\Pages/sec` in
+Performance Monitor shows when the host has settled.
 
 ## Access control
 

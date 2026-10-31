@@ -1,6 +1,12 @@
 [wsl2]
+# Copy to %UserProfile%\.wslconfig and run `wsl --shutdown`; Docker Desktop
+# restarts its VM. Cap the VM so its page cache, which grows as vLLM reads
+# 60 GB of weights at every model start, cannot take the 50% default (15.3 GiB
+# of 30.8) and leave Windows paging. Shared GPU memory is host RAM, so when
+# Windows pages, the model pays: uncapped, the same profile decoded 15-25%
+# slower and prefilled a 98K-token prompt 40% slower after a model start.
 memory=12GB
 swap=8GB
-
-[experimental]
-autoMemoryReclaim=dropCache
+# Hand cached memory back to Windows while the VM is idle. WSL 2.0 took this
+# key under [experimental]; WSL 3.x takes it here.
+autoMemoryReclaim=gradual

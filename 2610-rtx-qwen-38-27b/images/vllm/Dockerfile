@@ -1,9 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
-# The official vLLM 0.31 image publishes a native linux/arm64 CUDA 13 variant.
-# It adds DFlash 2 block drafting (vLLM 0.28+) and bundles xgrammar 0.2.7,
-# which already exposes normalize_tool_choice for OpenAI-style tool calls.
-FROM vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
+# The official vLLM image publishes a native linux/arm64 CUDA 13 variant.
+# 0.32 serves this model through vLLM's Model Runner V2 and decodes 7-9% more
+# steps a second than 0.31 on the same laptop and prompts, with the same
+# evaluation results (see the README). 0.28+ adds DFlash 2 block drafting,
+# and xgrammar 0.2.7+ exposes normalize_tool_choice for OpenAI-style tool calls.
+FROM vllm/vllm-openai:v0.32.0@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34
 
 ARG MODEL_ID=unsloth/Qwen3.8-27B-NVFP4
 ARG MODEL_REVISION=16b6615af3548b88e2d8e382457bc705b00479cf
@@ -31,7 +33,7 @@ ENV HF_HUB_OFFLINE=1 \
 LABEL org.opencontainers.image.title="Qwen3.8-27B NVFP4 vLLM server" \
       org.opencontainers.image.source="https://huggingface.co/unsloth/Qwen3.8-27B-NVFP4" \
       ai.runtime.name="vLLM" \
-      ai.runtime.version="0.31.0" \
+      ai.runtime.version="0.32.0" \
       ai.model.base="Qwen/Qwen3.8-27B" \
       ai.model.repository="unsloth/Qwen3.8-27B-NVFP4" \
       ai.model.revision="16b6615af3548b88e2d8e382457bc705b00479cf" \
@@ -52,6 +54,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15m --retries=5 \
 # tokens, a multiple of the drafter's 64-token sliding-window kernel block.
 # With the default 1,648 the drafter pages are padded to full hybrid pages and
 # a 196,608-token request needs 13.5 GiB of KV cache instead of 9.2 GiB.
+# Explicit async scheduling decodes about 5% more steps a second with the
+# same outputs.
 ENTRYPOINT []
 CMD ["python3", "-m", "vllm.entrypoints.openai.api_server", \
      "--model", "/models/Qwen3.8-27B-NVFP4", \
@@ -67,6 +71,7 @@ CMD ["python3", "-m", "vllm.entrypoints.openai.api_server", \
      "--max-model-len", "262144", \
      "--max-num-seqs", "1", \
      "--max-num-batched-tokens", "8192", \
+     "--async-scheduling", \
      "--gpu-memory-utilization", "0.05", \
      "--kv-cache-memory-bytes", "12616466432", \
      "--kv-cache-dtype", "fp8", \

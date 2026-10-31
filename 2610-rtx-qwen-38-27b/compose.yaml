@@ -5,11 +5,12 @@
 #   docker compose up -d                     # serve
 #   docker compose -f compose.yaml -f compose.observability.yaml up -d   # serve and ship metrics
 #
-# Every tunable below defaults to the profile the blog post measured; override
-# it in .env.
+# Every tunable below defaults to the profile the blog post measured, moved to
+# vLLM 0.32 with async scheduling on 2026-10-30 (see the README's What we
+# measured); override it in .env.
 services:
   qwen3.8-27b:
-    image: local/qwen3.8-27b:nvfp4-vllm031
+    image: local/qwen3.8-27b:nvfp4-vllm032
     build:
       context: .
       dockerfile: images/vllm/Dockerfile
@@ -65,6 +66,9 @@ services:
       - "${QWEN38_27B_MAX_NUM_SEQS:-1}"
       - --max-num-batched-tokens
       - "${QWEN38_27B_MAX_NUM_BATCHED_TOKENS:-8192}"
+      # Explicit async scheduling decodes about 5% more steps a second (8.95
+      # against 8.53 on the code benchmark) with the same outputs.
+      - --async-scheduling
       # With an explicit KV cache size this only sets vLLM's startup memory
       # check; a low value keeps that check below the GPU's share of memory.
       - --gpu-memory-utilization
