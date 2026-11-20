@@ -1,6 +1,6 @@
 # Azure SRE Agent inside Azure Managed Grafana: the Orders API demo
 
-Sample code for the blog post *Introducing Azure SRE Agent in Azure Managed Grafana: The Dashboard as Command Center*.
+Sample code for the blog post [*Introducing Azure SRE Agent in Azure Managed Grafana: The Dashboard as Command Center*](https://techcommunity.microsoft.com/blog/appsonazureblog/introducing-azure-sre-agent-in-azure-managed-grafana-the-dashboard-as-command-ce/4575039).
 
 It is a small web app with a deliberate bug, a Grafana dashboard that watches it through four sources, and
 the scripts that create both. With the [Azure SRE Agent integration](https://learn.microsoft.com/azure/managed-grafana/how-to-integrate-with-sre-agent)
