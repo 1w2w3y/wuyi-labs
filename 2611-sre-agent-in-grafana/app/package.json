@@ -1,0 +1,13 @@
+{
+  "name": "orders-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demo service with an unbounded in-memory cache, for the Azure SRE Agent in Azure Managed Grafana post",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

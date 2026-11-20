@@ -1,0 +1,33 @@
+# Azure Container Instances group that runs Prometheus as the scraper.
+# deploy.ps1 replaces the __PLACEHOLDERS__.
+apiVersion: '2023-05-01'
+location: __LOCATION__
+name: orders-api-scraper
+identity:
+  type: UserAssigned
+  userAssignedIdentities:
+    '__SCRAPER_IDENTITY_ID__': {}
+properties:
+  osType: Linux
+  restartPolicy: Always
+  containers:
+    - name: prometheus
+      properties:
+        image: quay.io/prometheus/prometheus:v2.55.1
+        command:
+          - /bin/prometheus
+          - --config.file=/etc/prometheus-config/prometheus.yml
+          - --storage.tsdb.path=/prometheus
+          - --storage.tsdb.retention.time=2h
+        resources:
+          requests:
+            cpu: 0.5
+            memoryInGB: 1
+        volumeMounts:
+          - name: config
+            mountPath: /etc/prometheus-config
+            readOnly: true
+  volumes:
+    - name: config
+      secret:
+        prometheus.yml: __PROMETHEUS_YML_BASE64__

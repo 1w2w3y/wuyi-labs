@@ -1,0 +1,20 @@
+# Scrapes the Orders API /metrics endpoint and remote-writes to an Azure Monitor workspace.
+# deploy.ps1 replaces the __PLACEHOLDERS__.
+global:
+  scrape_interval: 15s
+  external_labels:
+    service: orders-api
+
+scrape_configs:
+  - job_name: orders-api
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['__APP_HOST__']
+
+remote_write:
+  - url: '__INGESTION_ENDPOINT__/dataCollectionRules/__DCR_IMMUTABLE_ID__/streams/Microsoft-PrometheusMetrics/api/v1/write?api-version=2023-04-24'
+    azuread:
+      cloud: AzurePublic
+      managed_identity:
+        client_id: '__SCRAPER_CLIENT_ID__'

@@ -1,0 +1,5 @@
+# The containers are Linux; keep LF there. Windows scripts get CRLF, which
+# Windows Script Host and Windows PowerShell 5.1 handle best.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
